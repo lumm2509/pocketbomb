@@ -107,6 +107,21 @@ func main() {
 	// applications CLI (deploy and catalog providers tools)
 	applicationscmd.MustRegister(app, app.RootCmd)
 
+	// the GraphQL read API is registered automatically at /api/graphql and
+	// generates its schema from the collections with a public list/view rule
+	// (see Settings -> GraphQL in the dashboard).
+	//
+	// The hook below is just an example of how to inspect the incoming GraphQL
+	// operations. It could also rewrite e.Query/e.Variables or short-circuit
+	// the request by writing a response and not calling e.Next().
+	app.OnGraphQLRequest().BindFunc(func(e *core.GraphQLRequestEvent) error {
+		if app.IsDev() {
+			app.Logger().Info("GraphQL request", "operation", e.OperationName)
+		}
+
+		return e.Next()
+	})
+
 	// static route to serves files from the provided public dir
 	// (if publicDir exists and the route path is not already defined)
 	app.OnServe().Bind(&hook.Handler[*core.ServeEvent]{
