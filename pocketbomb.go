@@ -1,4 +1,4 @@
-package pocketbase
+package pocketbomb
 
 import (
 	"errors"
@@ -21,16 +21,16 @@ import (
 	_ "github.com/lumm2509/pocketbomb/migrations"
 )
 
-var _ core.App = (*PocketBase)(nil)
+var _ core.App = (*PocketBomb)(nil)
 
-// Version of PocketBase
+// Version of PocketBomb
 var Version = "(untracked)"
 
-// PocketBase defines a PocketBase app launcher.
+// PocketBomb defines a PocketBomb app launcher.
 //
 // It implements [core.App] via embedding and all of the app interface methods
-// could be accessed directly through the instance (eg. PocketBase.DataDir()).
-type PocketBase struct {
+// could be accessed directly through the instance (eg. PocketBomb.DataDir()).
+type PocketBomb struct {
 	core.App
 
 	devFlag           bool
@@ -43,7 +43,7 @@ type PocketBase struct {
 	RootCmd *cobra.Command
 }
 
-// Config is the PocketBase initialization config struct.
+// Config is the PocketBomb initialization config struct.
 type Config struct {
 	// hide the default console server info on app startup
 	HideStartBanner bool
@@ -62,15 +62,15 @@ type Config struct {
 	DBConnect        core.DBConnectFunc // default to core.dbConnect
 }
 
-// New creates a new PocketBase instance with the default configuration.
+// New creates a new PocketBomb instance with the default configuration.
 // Use [NewWithConfig] if you want to provide a custom configuration.
 //
 // Note that the application will not be initialized/bootstrapped yet,
 // aka. DB connections, migrations, app settings, etc. will not be accessible.
-// Everything will be initialized when [PocketBase.Start] is executed.
-// If you want to initialize the application before calling [PocketBase.Start],
-// then you'll have to manually call [PocketBase.Bootstrap].
-func New() *PocketBase {
+// Everything will be initialized when [PocketBomb.Start] is executed.
+// If you want to initialize the application before calling [PocketBomb.Start],
+// then you'll have to manually call [PocketBomb.Bootstrap].
+func New() *PocketBomb {
 	_, isUsingGoRun := inspectRuntime()
 
 	return NewWithConfig(Config{
@@ -78,14 +78,14 @@ func New() *PocketBase {
 	})
 }
 
-// NewWithConfig creates a new PocketBase instance with the provided config.
+// NewWithConfig creates a new PocketBomb instance with the provided config.
 //
 // Note that the application will not be initialized/bootstrapped yet,
 // aka. DB connections, migrations, app settings, etc. will not be accessible.
-// Everything will be initialized when [PocketBase.Start] is executed.
-// If you want to initialize the application before calling [PocketBase.Start],
-// then you'll have to manually call [PocketBase.Bootstrap].
-func NewWithConfig(config Config) *PocketBase {
+// Everything will be initialized when [PocketBomb.Start] is executed.
+// If you want to initialize the application before calling [PocketBomb.Start],
+// then you'll have to manually call [PocketBomb.Bootstrap].
+func NewWithConfig(config Config) *PocketBomb {
 	// initialize a default data directory based on the executable baseDir
 	if config.DefaultDataDir == "" {
 		baseDir, _ := inspectRuntime()
@@ -98,7 +98,7 @@ func NewWithConfig(config Config) *PocketBase {
 
 	executableName := filepath.Base(os.Args[0])
 
-	pb := &PocketBase{
+	pb := &PocketBomb{
 		RootCmd: &cobra.Command{
 			Use:     executableName,
 			Short:   executableName + " CLI",
@@ -164,7 +164,7 @@ func NewWithConfig(config Config) *PocketBase {
 
 // Start starts the application, aka. registers the default system
 // commands (serve, superuser, version) and executes pb.RootCmd.
-func (pb *PocketBase) Start() error {
+func (pb *PocketBomb) Start() error {
 	// register system commands
 	pb.RootCmd.AddCommand(cmd.NewSuperuserCommand(pb))
 	pb.RootCmd.AddCommand(cmd.NewServeCommand(pb, !pb.hideStartBanner))
@@ -177,7 +177,7 @@ func (pb *PocketBase) Start() error {
 //
 // This method differs from pb.Start() by not registering the default
 // system commands!
-func (pb *PocketBase) Execute() error {
+func (pb *PocketBomb) Execute() error {
 	if !pb.skipBootstrap() {
 		if err := pb.Bootstrap(); err != nil {
 			return err
@@ -215,13 +215,13 @@ func (pb *PocketBase) Execute() error {
 }
 
 // eagerParseFlags parses the global app flags before calling pb.RootCmd.Execute().
-// so we can have all PocketBase flags ready for use on initialization.
-func (pb *PocketBase) eagerParseFlags(config *Config) error {
+// so we can have all PocketBomb flags ready for use on initialization.
+func (pb *PocketBomb) eagerParseFlags(config *Config) error {
 	pb.RootCmd.PersistentFlags().StringVar(
 		&pb.dataDirFlag,
 		"dir",
 		config.DefaultDataDir,
-		"the PocketBase data directory",
+		"the PocketBomb data directory",
 	)
 
 	pb.RootCmd.PersistentFlags().StringVar(
@@ -256,7 +256,7 @@ func (pb *PocketBase) eagerParseFlags(config *Config) error {
 //
 // https://github.com/lumm2509/pocketbomb/issues/404
 // https://github.com/lumm2509/pocketbomb/discussions/1267
-func (pb *PocketBase) skipBootstrap() bool {
+func (pb *PocketBomb) skipBootstrap() bool {
 	flags := []string{
 		"-h",
 		"--help",
