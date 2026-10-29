@@ -1,0 +1,21 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="same-origin">
+    <title>{{.Title}}</title>
+    <style nonce="{{.Nonce}}">:root { --primary: {{.PrimaryColor}}; } {{.CSS}}</style>
+</head>
+<body>
+    <main class="card">
+        <header class="header">
+            {{if .LogoURL}}<img class="logo" src="{{.LogoURL}}" alt="">{{end}}
+            <div class="title">{{.Title}}</div>
+        </header>
+        {{with .Page}}{{template "content" .}}{{end}}
+    </main>
+</body>
+</html>
+{{end}}

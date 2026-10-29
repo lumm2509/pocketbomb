@@ -1,0 +1,12 @@
+{{define "content"}}
+<h1>Verify your email</h1>
+{{if .Email}}<p class="subtitle"><strong>{{.Email}}</strong></p>{{end}}
+
+{{if .Error}}<div class="alert" role="alert">{{.Error}}</div>{{end}}
+
+<form method="post" action="{{.Action}}">
+    <input type="hidden" name="token" value="{{.Token}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button type="submit">Verify email</button>
+</form>
+{{end}}

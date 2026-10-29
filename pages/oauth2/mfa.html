@@ -1,0 +1,37 @@
+{{define "content"}}
+<h1>Additional verification</h1>
+<p class="subtitle">Confirm that it's you{{if .UserLabel}}, <strong>{{.UserLabel}}</strong>{{end}}{{if .Name}}, to continue to <strong>{{.Name}}</strong>{{end}}.</p>
+
+{{if .Error}}<div class="alert" role="alert">{{.Error}}</div>{{end}}
+
+{{if .PasswordAction}}
+<form method="post" action="{{.PasswordAction}}">
+    <input type="hidden" name="auth_state" value="{{.AuthState}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Password
+        <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Continue</button>
+</form>
+{{end}}
+
+{{if .OTPAction}}
+{{if .PasswordAction}}<div class="divider">or</div>{{end}}
+<form method="post" action="{{.OTPAction}}">
+    <input type="hidden" name="auth_state" value="{{.AuthState}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button type="submit" class="secondary">Email me a one-time code</button>
+</form>
+{{end}}
+
+{{if .Providers}}
+{{if or .PasswordAction .OTPAction}}<div class="divider">or</div>{{end}}
+<div class="providers">
+    {{range .Providers}}<a class="btn" href="{{.URL}}">Continue with {{.DisplayName}}</a>{{end}}
+</div>
+{{end}}
+
+{{if not .HasMethods}}
+<div class="alert">There are no additional verification methods available.</div>
+{{end}}
+{{end}}

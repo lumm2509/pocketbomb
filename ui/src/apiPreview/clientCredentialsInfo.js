@@ -1,0 +1,71 @@
+/**
+ * Returns the records API client credentials headers table
+ * (the requests without an API key and without an access token are rejected with 401).
+ *
+ * The dashboard itself uses its first-party access token (no API keys).
+ *
+ * @return {Element}
+ */
+export function clientCredentialsInfo() {
+    const row = (name, description) =>
+        t.tr(
+            null,
+            t.td({ className: "min-width" }, name),
+            t.td({ className: "min-width" }, t.span({ className: "label" }, "String")),
+            t.td(null, description),
+        );
+
+    return t.table(
+        { className: "api-preview-table client-credentials-headers" },
+        t.thead(
+            null,
+            t.tr(
+                null,
+                t.th({ className: "min-width txt-primary" }, "Headers"),
+                t.th({ className: "min-width" }, "Type"),
+                t.th(
+                    null,
+                    "Client credentials - at least an API key or an access token is required (otherwise ",
+                    t.code(null, "401 missing_client_credentials"),
+                    ")",
+                ),
+            ),
+        ),
+        t.tbody(
+            null,
+            row(
+                "X-PB-Public-Key",
+                t.span(
+                    null,
+                    "Public (browser-safe) API key of an OAuth2 client (",
+                    t.code(null, "pb_pk_..."),
+                    "). Could be also sent as ",
+                    t.code(null, "?pk="),
+                    " query parameter (e.g. for the realtime EventSource).",
+                ),
+            ),
+            row(
+                "X-PB-Private-Key",
+                t.span(
+                    null,
+                    "Private (server-only) API key (",
+                    t.code(null, "pb_sk_..."),
+                    "). Never from a browser or the query string.",
+                ),
+            ),
+            row(
+                "X-PB-Buyer-IP",
+                "The end-user IP forwarded by the server with a private key (required unless the key has no buyer context).",
+            ),
+            row(
+                "Authorization",
+                t.span(
+                    null,
+                    "OAuth2 access token (",
+                    t.code(null, "Bearer TOKEN"),
+                    "). When sent together with an API key both must belong to the same OAuth2 client.",
+                ),
+            ),
+        ),
+    );
+}

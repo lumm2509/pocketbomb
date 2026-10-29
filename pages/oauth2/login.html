@@ -1,0 +1,52 @@
+{{define "content"}}
+<h1>Sign in</h1>
+{{if .Name}}<p class="subtitle">to continue to <strong>{{.Name}}</strong></p>{{end}}
+
+{{if .Error}}<div class="alert" role="alert">{{.Error}}</div>{{end}}
+{{if .Notice}}<div class="notice" role="status">{{.Notice}}</div>{{end}}
+
+{{if .PasswordAction}}
+<form class="method" method="post" action="{{.PasswordAction}}">
+    <input type="hidden" name="auth_state" value="{{.AuthState}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>{{.IdentityLabel}}
+        <input type="text" name="identity" autocomplete="username" required value="{{.LoginHint}}">
+    </label>
+    <label>
+        <span class="field-row">Password {{if .PasswordResetURL}}<a class="link" href="{{.PasswordResetURL}}">Forgot password?</a>{{end}}</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Sign in</button>
+</form>
+{{end}}
+
+{{if .OTPAction}}
+{{if .PasswordAction}}<div class="divider">or</div>{{end}}
+<form method="post" action="{{.OTPAction}}">
+    <input type="hidden" name="auth_state" value="{{.AuthState}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Email
+        <input type="email" name="email" autocomplete="email" required value="{{.LoginHint}}">
+    </label>
+    <button type="submit" class="secondary">Email me a one-time code</button>
+</form>
+{{end}}
+
+{{if .Providers}}
+{{if or .PasswordAction .OTPAction}}<div class="divider">or</div>{{end}}
+<div class="providers">
+    {{range .Providers}}<a class="btn" href="{{.URL}}">Continue with {{.DisplayName}}</a>{{end}}
+</div>
+{{end}}
+
+{{if not .HasMethods}}
+<div class="alert">There are no sign-in methods available.</div>
+{{end}}
+
+{{if or .SignupURL .VerificationRequestURL}}
+<div class="links">
+    {{if .SignupURL}}<p>Don't have an account? <a href="{{.SignupURL}}">Sign up</a></p>{{end}}
+    {{if .VerificationRequestURL}}<p><a href="{{.VerificationRequestURL}}">Resend verification email</a></p>{{end}}
+</div>
+{{end}}
+{{end}}

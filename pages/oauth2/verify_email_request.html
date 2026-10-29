@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1>Verify your email</h1>
+
+{{if .Error}}<div class="alert" role="alert">{{.Error}}</div>{{end}}
+
+{{if .Notice}}
+<div class="notice" role="status">{{.Notice}}</div>
+{{else}}
+<p class="subtitle">Enter your account email and we'll send you a new verification link.</p>
+<form method="post" action="{{.Action}}">
+    <input type="hidden" name="auth_state" value="{{.AuthState}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Email
+        <input type="email" name="email" autocomplete="email" required value="{{.Email}}">
+    </label>
+    <button type="submit">Send verification link</button>
+</form>
+{{end}}
+
+{{if .LoginURL}}<div class="links"><p><a href="{{.LoginURL}}">Back to sign in</a></p></div>{{end}}
+{{end}}

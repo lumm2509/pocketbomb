@@ -1,0 +1,17 @@
+{{define "content"}}
+{{if .Logo}}<img class="client-logo" src="{{.Logo}}" alt="">{{end}}
+<h1>{{.Name}}</h1>
+<p class="subtitle">wants to access your account<br><strong>{{.UserLabel}}</strong></p>
+
+<p class="muted">This will allow {{.Name}} to:</p>
+<ul class="scopes">
+    {{range .Scopes}}<li>{{.}}</li>{{end}}
+</ul>
+
+<form method="post" action="{{.Action}}">
+    <input type="hidden" name="auth_state" value="{{.AuthState}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button type="submit" name="decision" value="allow">Allow</button>
+    <button type="submit" name="decision" value="deny" class="secondary">Cancel</button>
+</form>
+{{end}}

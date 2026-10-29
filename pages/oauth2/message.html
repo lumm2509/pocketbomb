@@ -1,0 +1,15 @@
+{{define "content"}}
+<h1>{{.Heading}}</h1>
+{{if .Message}}<p class="subtitle">{{.Message}}</p>{{end}}
+{{if .ErrorCode}}<p class="center muted">Error: <code>{{.ErrorCode}}</code></p>{{end}}
+
+{{if .Action}}
+<form method="post" action="{{.Action}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{range $name, $value := .Params}}<input type="hidden" name="{{$name}}" value="{{$value}}">{{end}}
+    <button type="submit">{{.ActionLabel}}</button>
+</form>
+{{end}}
+
+{{if .LinkURL}}<div class="links"><p><a href="{{.LinkURL}}">{{.LinkLabel}}</a></p></div>{{end}}
+{{end}}

@@ -1,0 +1,628 @@
+package apis
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"runtime"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/lumm2509/pocketbomb/core"
+	"github.com/lumm2509/pocketbomb/tools/hook"
+	"github.com/lumm2509/pocketbomb/tools/list"
+	"github.com/lumm2509/pocketbomb/tools/router"
+	"github.com/lumm2509/pocketbomb/tools/routine"
+	"github.com/spf13/cast"
+)
+
+// Common request event store keys used by the middlewares and api handlers.
+const (
+	RequestEventKeyLogMeta = "pbLogMeta" // extra data to store with the request activity log
+
+	requestEventKeyExecStart              = "__execStart"                 // the value must be time.Time
+	requestEventKeySkipSuccessActivityLog = "__skipSuccessActivityLogger" // the value must be bool
+)
+
+const (
+	DefaultWWWRedirectMiddlewarePriority = -99999
+	DefaultWWWRedirectMiddlewareId       = "pbWWWRedirect"
+
+	DefaultActivityLoggerMiddlewarePriority   = DefaultRateLimitMiddlewarePriority - 40
+	DefaultActivityLoggerMiddlewareId         = "pbActivityLogger"
+	DefaultSkipSuccessActivityLogMiddlewareId = "pbSkipSuccessActivityLog"
+	DefaultEnableAuthIdActivityLog            = "pbEnableAuthIdActivityLog"
+
+	DefaultPanicRecoverMiddlewarePriority = DefaultRateLimitMiddlewarePriority - 30
+	DefaultPanicRecoverMiddlewareId       = "pbPanicRecover"
+
+	DefaultLoadAuthTokenMiddlewarePriority = DefaultRateLimitMiddlewarePriority - 20
+	DefaultLoadAuthTokenMiddlewareId       = "pbLoadAuthToken"
+
+	DefaultSuperuserIPsWhitelistMiddlewarePriority = DefaultLoadAuthTokenMiddlewarePriority + 5
+	DefaultSuperuserIPsWhitelistMiddlewareId       = "pbSuperuserIPsWhitelist"
+
+	DefaultSecurityHeadersMiddlewarePriority = DefaultRateLimitMiddlewarePriority - 10
+	DefaultSecurityHeadersMiddlewareId       = "pbSecurityHeaders"
+
+	DefaultRequireGuestOnlyMiddlewareId                 = "pbRequireGuestOnly"
+	DefaultRequireAuthMiddlewareId                      = "pbRequireAuth"
+	DefaultRequirePermissionMiddlewareId                = "pbRequirePermission"
+	DefaultRequireSuperuserOrOwnerAuthMiddlewareId      = "pbRequireSuperuserOrOwnerAuth"
+	DefaultRequireSameCollectionContextAuthMiddlewareId = "pbRequireSameCollectionContextAuth"
+
+	DefaultRequireFirstPartyTokenMiddlewareId       = "pbRequireFirstPartyToken"
+	DefaultRequireFirstPartyTokenMiddlewarePriority = DefaultLoadAuthTokenMiddlewarePriority + 1
+)
+
+// RequireGuestOnly middleware requires a request to NOT have a valid
+// Authorization header.
+//
+// This middleware is the opposite of [apis.RequireAuth()].
+func RequireGuestOnly() *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id: DefaultRequireGuestOnlyMiddlewareId,
+		Func: func(e *core.RequestEvent) error {
+			if e.Auth != nil {
+				return router.NewBadRequestError("The request can be accessed only by guests.", nil)
+			}
+
+			return e.Next()
+		},
+	}
+}
+
+// RequireAuth middleware requires a request to have a valid record Authorization header.
+//
+// The auth record could be from any collection.
+// You can further filter the allowed record auth collections by specifying their names.
+//
+// Example:
+//
+//	apis.RequireAuth()                      // any auth collection
+//	apis.RequireAuth("_superusers", "users") // only the listed auth collections
+func RequireAuth(optCollectionNames ...string) *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id:   DefaultRequireAuthMiddlewareId,
+		Func: requireAuth(optCollectionNames...),
+	}
+}
+
+func requireAuth(optCollectionNames ...string) func(*core.RequestEvent) error {
+	return func(e *core.RequestEvent) error {
+		if e.Auth == nil {
+			return e.UnauthorizedError("The request requires valid record authorization token.", nil)
+		}
+
+		// check record collection name
+		if len(optCollectionNames) > 0 && !slices.Contains(optCollectionNames, e.Auth.Collection().Name) {
+			return e.ForbiddenError("The authorized record is not allowed to perform this action.", nil)
+		}
+
+		return e.Next()
+	}
+}
+
+// RequirePermission middleware requires the request actor to be a staff member
+// with the specified RBAC system resource level (see [core.Authorize]).
+//
+// Multiple resources could be specified as "resource:level" pairs, e.g.
+//
+//	apis.RequirePermission(core.PermissionResourceSettings, core.PermissionLevelRead)
+//	apis.RequirePermission(core.PermissionResourceBackups, core.PermissionLevelWrite, core.PermissionResourceSettings, core.PermissionLevelWrite)
+//
+// Owners always pass (the "sql" resource is available only for the Owners).
+func RequirePermission(resource string, level string, extraResourceLevelPairs ...string) *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id: DefaultRequirePermissionMiddlewareId,
+		Func: func(e *core.RequestEvent) error {
+			if e.Auth == nil {
+				return e.UnauthorizedError("The request requires valid record authorization token.", nil)
+			}
+
+			if err := requirePermissions(e, append([]string{resource, level}, extraResourceLevelPairs...)...); err != nil {
+				return err
+			}
+
+			return e.Next()
+		},
+	}
+}
+
+// requirePermissions checks the "resource, level" pairs against the request actor permissions.
+func requirePermissions(e *core.RequestEvent, resourceLevelPairs ...string) error {
+	for i := 0; i+1 < len(resourceLevelPairs); i += 2 {
+		if !e.Can(resourceLevelPairs[i], resourceLevelPairs[i+1]) {
+			return e.ForbiddenError("The authorized record is not allowed to perform this action.", nil)
+		}
+	}
+
+	return nil
+}
+
+// RequireSuperuserOrOwnerAuth middleware requires a request to have
+// a valid Owner (RBAC) or regular record owner Authorization header set.
+//
+// This middleware is similar to [apis.RequireAuth()] but
+// for the auth record token expects to have the same id as the path
+// parameter ownerIdPathParam (default to "id" if empty).
+func RequireSuperuserOrOwnerAuth(ownerIdPathParam string) *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id: DefaultRequireSuperuserOrOwnerAuthMiddlewareId,
+		Func: func(e *core.RequestEvent) error {
+			if e.Auth == nil {
+				return e.UnauthorizedError("The request requires superuser or record authorization token.", nil)
+			}
+
+			if e.IsOwner() {
+				return e.Next()
+			}
+
+			if ownerIdPathParam == "" {
+				ownerIdPathParam = "id"
+			}
+			ownerId := e.Request.PathValue(ownerIdPathParam)
+
+			// note: it is considered "safe" to compare only the record id
+			// since the auth record ids are treated as unique across all auth collections
+			if e.Auth.Id != ownerId {
+				return e.ForbiddenError("You are not allowed to perform this request.", nil)
+			}
+
+			return e.Next()
+		},
+	}
+}
+
+// RequireFirstPartyToken middleware rejects the requests authorized with
+// an access token of a third-party (aka. non first-party) OAuth2 client
+// (e.g. for the account related actions that could lead to an account takeover).
+func RequireFirstPartyToken() *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id:       DefaultRequireFirstPartyTokenMiddlewareId,
+		Priority: DefaultRequireFirstPartyTokenMiddlewarePriority,
+		Func: func(e *core.RequestEvent) error {
+			if hasThirdPartyToken(e) {
+				return e.ForbiddenError(thirdPartyTokenForbiddenMessage, errors.New("restricted_route"))
+			}
+
+			return e.Next()
+		},
+	}
+}
+
+const thirdPartyTokenForbiddenMessage = "OAuth2 access tokens are not allowed to perform this action."
+
+// hasThirdPartyToken reports whether the request is authorized with
+// an access token of a third-party (aka. non first-party) OAuth2 client.
+//
+// note: the token data is intentionally not checked against the current e.Auth as a safer default.
+func hasThirdPartyToken(e *core.RequestEvent) bool {
+	if e.Auth == nil {
+		return false
+	}
+
+	data, _ := e.Get(core.RequestEventKeyOAuth2).(*core.RequestInfoOAuth2)
+
+	return data != nil && data.ClientId != "" && !data.FirstParty
+}
+
+// RequireSameCollectionContextAuth middleware requires a request to have
+// a valid record Authorization header and the auth record's collection to
+// match the one from the route path parameter (default to "collection" if collectionParam is empty).
+func RequireSameCollectionContextAuth(collectionPathParam string) *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id: DefaultRequireSameCollectionContextAuthMiddlewareId,
+		Func: func(e *core.RequestEvent) error {
+			if e.Auth == nil {
+				return e.UnauthorizedError("The request requires valid record authorization token.", nil)
+			}
+
+			if collectionPathParam == "" {
+				collectionPathParam = "collection"
+			}
+
+			collection, _ := e.App.FindCachedCollectionByNameOrId(e.Request.PathValue(collectionPathParam))
+			if collection == nil || e.Auth.Collection().Id != collection.Id {
+				return e.ForbiddenError(fmt.Sprintf("The request requires auth record from %s collection.", e.Auth.Collection().Name), nil)
+			}
+
+			return e.Next()
+		},
+	}
+}
+
+// loadAuthToken attempts to load the auth context based on the "Authorization: TOKEN" header value.
+//
+// This middleware does nothing in case of:
+//   - missing, invalid or expired token
+//   - e.Auth is already loaded by another middleware
+//
+// This middleware is registered by default for all routes.
+//
+// Note: We don't throw an error on invalid or expired token to allow
+// users to extend with their own custom handling in external middleware(s).
+func loadAuthToken() *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id:       DefaultLoadAuthTokenMiddlewareId,
+		Priority: DefaultLoadAuthTokenMiddlewarePriority,
+		Func: func(e *core.RequestEvent) error {
+			// already loaded by another middleware
+			if e.Auth != nil {
+				return e.Next()
+			}
+
+			token := getAuthTokenFromRequest(e)
+			if token == "" {
+				return e.Next()
+			}
+
+			record, err := e.App.FindAuthRecordByToken(token, core.TokenTypeAuth)
+			if err != nil {
+				e.App.Logger().Debug("loadAuthToken failure", "error", err)
+			} else if record != nil {
+				e.Auth = record
+				e.Set(core.RequestEventKeyOAuth2, newAuthTokenOAuth2Info(e.App, record, token))
+			}
+
+			return e.Next()
+		},
+	}
+}
+
+func getAuthTokenFromRequest(e *core.RequestEvent) string {
+	token := e.Request.Header.Get("Authorization")
+
+	// the "Bearer" schema prefix is not required by PocketBase and it is
+	// supported only for compatibility with the defaults of some HTTP clients
+	if len(token) > 7 && strings.EqualFold(token[:7], "Bearer ") {
+		return token[7:]
+	}
+
+	return token
+}
+
+// wwwRedirect performs www->non-www redirect(s) if the request host
+// matches with one of the values in redirectHosts.
+//
+// This middleware is registered by default on Serve for all routes.
+func wwwRedirect(redirectHosts []string) *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id:       DefaultWWWRedirectMiddlewareId,
+		Priority: DefaultWWWRedirectMiddlewarePriority,
+		Func: func(e *core.RequestEvent) error {
+			host := e.Request.Host
+
+			if strings.HasPrefix(host, "www.") && list.ExistInSlice(host, redirectHosts) {
+				// note: e.Request.URL.Scheme would be empty
+				schema := "http://"
+				if e.IsTLS() {
+					schema = "https://"
+				}
+
+				return e.Redirect(
+					http.StatusTemporaryRedirect,
+					(schema + host[4:] + e.Request.RequestURI),
+				)
+			}
+
+			return e.Next()
+		},
+	}
+}
+
+// panicRecover returns a default panic-recover handler.
+func panicRecover() *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id:       DefaultPanicRecoverMiddlewareId,
+		Priority: DefaultPanicRecoverMiddlewarePriority,
+		Func: func(e *core.RequestEvent) (err error) {
+			// panic-recover
+			defer func() {
+				recoverResult := recover()
+				if recoverResult == nil {
+					return
+				}
+
+				recoverErr, ok := recoverResult.(error)
+				if !ok {
+					recoverErr = fmt.Errorf("%v", recoverResult)
+				} else if errors.Is(recoverErr, http.ErrAbortHandler) {
+					// don't recover ErrAbortHandler so the response to the client can be aborted
+					panic(recoverResult)
+				}
+
+				stack := make([]byte, 2<<10) // 2 KB
+				length := runtime.Stack(stack, true)
+				err = e.InternalServerError("", fmt.Errorf("[PANIC RECOVER] %w %s", recoverErr, stack[:length]))
+			}()
+
+			err = e.Next()
+
+			return err
+		},
+	}
+}
+
+// securityHeaders middleware adds common security headers to the response.
+//
+// This middleware is registered by default for all routes.
+func securityHeaders() *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id:       DefaultSecurityHeadersMiddlewareId,
+		Priority: DefaultSecurityHeadersMiddlewarePriority,
+		Func: func(e *core.RequestEvent) error {
+			e.Response.Header().Set("X-XSS-Protection", "1; mode=block")
+			e.Response.Header().Set("X-Content-Type-Options", "nosniff")
+			e.Response.Header().Set("X-Frame-Options", "SAMEORIGIN")
+			e.Response.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+
+			// @todo consider a default HSTS?
+			// (see also https://webkit.org/blog/8146/protecting-against-hsts-abuse/)
+
+			return e.Next()
+		},
+	}
+}
+
+// superuserIPsWhitelistMessage is the forbidden error message of the superuser IPs allow-list.
+const superuserIPsWhitelistMessage = "Staff access, including applications acting on behalf of a staff member, is restricted to the allowed IPs."
+
+// superuserIPsWhitelist middleware checks the current request IP against the configured
+// SuperuserIPs whitelist setting for every token whose actor is a staff (_superusers) record
+// (it restricts the staff identity, therefore also the third-party and the application
+// extensions online tokens of a staff member; see also [core.RequestInfo.IsStaff]).
+//
+// This middleware is registered by default for all routes.
+func superuserIPsWhitelist() *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id:       DefaultSuperuserIPsWhitelistMiddlewareId,
+		Priority: DefaultSuperuserIPsWhitelistMiddlewarePriority,
+		Func: func(e *core.RequestEvent) error {
+			if e.Auth != nil && e.Auth.IsSuperuser() {
+				ips := e.App.Settings().SuperuserIPs
+
+				if len(ips) > 0 && !isIPInList(ips, e.RealIP()) {
+					return e.ForbiddenError(superuserIPsWhitelistMessage, errors.New("superuser IP is not whitelisted"))
+				}
+			}
+
+			return e.Next()
+		},
+	}
+}
+
+// newAuthTokenOAuth2Info returns the OAuth2 data (client, scopes and trust)
+// of an already verified auth token of the provided record.
+func newAuthTokenOAuth2Info(app core.App, record *core.Record, token string) *core.RequestInfoOAuth2 {
+	oauth2Info := core.NewRequestInfoOAuth2(record, token)
+	if oauth2Info != nil {
+		// note: the token client existence and state are already checked by FindAuthRecordByToken
+		client, err := app.FindOAuth2ClientByClientId(oauth2Info.ClientId)
+		oauth2Info.FirstParty = err == nil && client.FirstParty()
+		if err == nil {
+			// the installation managed clients tokens (incl. the staff extension online tokens)
+			oauth2Info.ApplicationInstallationId = client.ApplicationInstallationRef()
+		}
+	}
+
+	return oauth2Info
+}
+
+// SkipSuccessActivityLog is a helper middleware that instructs the global
+// activity logger to log only requests that have failed/returned an error.
+func SkipSuccessActivityLog() *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id: DefaultSkipSuccessActivityLogMiddlewareId,
+		Func: func(e *core.RequestEvent) error {
+			e.Set(requestEventKeySkipSuccessActivityLog, true)
+			return e.Next()
+		},
+	}
+}
+
+// activityLogger middleware takes care to save the request information
+// into the logs database.
+//
+// This middleware is registered by default for all routes.
+//
+// The middleware does nothing if the app logs retention period is zero
+// (aka. app.Settings().Logs.MaxDays = 0).
+//
+// Users can attach the [apis.SkipSuccessActivityLog()] middleware if
+// you want to log only the failed requests.
+func activityLogger() *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id:       DefaultActivityLoggerMiddlewareId,
+		Priority: DefaultActivityLoggerMiddlewarePriority,
+		Func: func(e *core.RequestEvent) error {
+			e.Set(requestEventKeyExecStart, time.Now())
+
+			err := e.Next()
+
+			logRequest(e, err)
+
+			return err
+		},
+	}
+}
+
+// logRedactedQueryParams is the list of the query parameters whose values are
+// never stored in the request logs (tokens, codes, flow handles, secrets).
+var logRedactedQueryParams = []string{
+	"token",
+	"code",
+	"auth_state",
+	"state",
+	"csrf",
+	"refresh_token",
+	"access_token",
+	"id_token",
+	"id_token_hint",
+	"subject_token",
+	"actor_token",
+	"client_secret",
+	"code_verifier",
+	"password",
+	"otp",
+	APIKeyPublicQueryParam,
+}
+
+// redactLogURL replaces the values of the sensitive query parameters of the provided url
+// (absolute or request URI) with "REDACTED".
+func redactLogURL(rawURL string) string {
+	if rawURL == "" || !strings.Contains(rawURL, "?") {
+		return rawURL
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		// fallback to stripping the entire query
+		before, _, _ := strings.Cut(rawURL, "?")
+		return before + "?REDACTED"
+	}
+
+	query := u.Query()
+	changed := false
+	for key := range query {
+		if slices.Contains(logRedactedQueryParams, strings.ToLower(key)) {
+			query.Set(key, "REDACTED")
+			changed = true
+		}
+	}
+
+	if !changed {
+		return rawURL
+	}
+
+	u.RawQuery = query.Encode()
+
+	return u.String()
+}
+
+func logRequest(event *core.RequestEvent, err error) {
+	// no logs retention
+	if event.App.Settings().Logs.MaxDays == 0 {
+		return
+	}
+
+	// the non-error route has explicitly disabled the activity logger
+	if err == nil && event.Get(requestEventKeySkipSuccessActivityLog) != nil {
+		return
+	}
+
+	method, requestUri, attrs := requestLogAttrs(event, err)
+
+	// don't block on logs write
+	routine.FireAndForget(func() {
+		message := method + " "
+
+		if escaped, unescapeErr := url.PathUnescape(requestUri); unescapeErr == nil {
+			message += escaped
+		} else {
+			message += requestUri
+		}
+
+		if err != nil {
+			event.App.Logger().Error(message, attrs...)
+		} else {
+			event.App.Logger().Info(message, attrs...)
+		}
+	})
+}
+
+// requestLogAttrs returns the request log method, (redacted) url and attributes.
+func requestLogAttrs(event *core.RequestEvent, err error) (string, string, []any) {
+	attrs := make([]any, 0, 15)
+
+	attrs = append(attrs, slog.String("type", "request"))
+
+	started := cast.ToTime(event.Get(requestEventKeyExecStart))
+	if !started.IsZero() {
+		attrs = append(attrs, slog.Float64("execTime", float64(time.Since(started))/float64(time.Millisecond)))
+	}
+
+	if meta := event.Get(RequestEventKeyLogMeta); meta != nil {
+		attrs = append(attrs, slog.Any("meta", meta))
+	}
+
+	status := event.Status()
+	method := cutStr(strings.ToUpper(event.Request.Method), 50)
+	requestUri := cutStr(redactLogURL(event.Request.URL.RequestURI()), 3000)
+
+	// parse the request error
+	if err != nil {
+		apiErr, isPlainApiError := err.(*router.ApiError)
+		if isPlainApiError || errors.As(err, &apiErr) {
+			// the status header wasn't written yet
+			if status == 0 {
+				status = apiErr.Status
+			}
+
+			var errMsg string
+			if isPlainApiError {
+				errMsg = apiErr.Message
+			} else {
+				// wrapped ApiError -> add the full serialized version
+				// of the original error since it could contain more information
+				errMsg = err.Error()
+			}
+
+			attrs = append(
+				attrs,
+				slog.String("error", errMsg),
+				slog.Any("details", apiErr.RawData()),
+			)
+		} else {
+			attrs = append(attrs, slog.String("error", err.Error()))
+		}
+	}
+
+	attrs = append(
+		attrs,
+		slog.String("url", requestUri),
+		slog.String("method", method),
+		slog.Int("status", status),
+		slog.String("referer", cutStr(redactLogURL(event.Request.Referer()), 2000)),
+		slog.String("userAgent", cutStr(event.Request.UserAgent(), 2000)),
+	)
+
+	if event.Auth != nil {
+		attrs = append(attrs, slog.String("auth", event.Auth.Collection().Name))
+
+		if event.App.Settings().Logs.LogAuthId {
+			attrs = append(attrs, slog.String("authId", event.Auth.Id))
+		}
+	} else {
+		attrs = append(attrs, slog.String("auth", ""))
+	}
+
+	// the API key id (never the key itself) and the forwarded buyer IP
+	if apiKey, _ := event.Get(core.RequestEventKeyAPIKey).(*core.RequestInfoAPIKey); apiKey != nil {
+		attrs = append(attrs, slog.String("apiKeyId", apiKey.KeyId))
+
+		if apiKey.BuyerIP != "" && event.App.Settings().Logs.LogIP {
+			attrs = append(attrs, slog.String("buyerIp", apiKey.BuyerIP))
+		}
+	}
+
+	if event.App.Settings().Logs.LogIP {
+		attrs = append(
+			attrs,
+			slog.String("userIP", event.RealIP()),
+			slog.String("remoteIP", event.RemoteIP()),
+		)
+	}
+
+	return method, requestUri, attrs
+}
+
+func cutStr(str string, max int) string {
+	if len(str) > max {
+		return str[:max] + "..."
+	}
+	return str
+}

@@ -1,0 +1,15 @@
+{{define "content"}}
+<h1>Confirm your new email</h1>
+{{if .Email}}<p class="subtitle">Change your account email to <strong>{{.Email}}</strong></p>{{end}}
+
+{{if .Error}}<div class="alert" role="alert">{{.Error}}</div>{{end}}
+
+<form method="post" action="{{.Action}}">
+    <input type="hidden" name="token" value="{{.Token}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Current password
+        <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Confirm new email</button>
+</form>
+{{end}}

@@ -1,0 +1,118 @@
+/* applications (extensions / api keys) */
+.page-applications {
+    .applications-search {
+        max-width: 400px;
+    }
+    .application-catalog-source .oauth2-clients-group-title {
+        gap: 8px;
+    }
+}
+.applications-sidebar {
+    .application-extension-nav-item {
+        border: 0;
+        background: none;
+        text-align: left;
+        font-family: inherit;
+        .oauth2-app-logo-thumb {
+            width: 20px;
+            height: 20px;
+            font-size: 0.9em;
+        }
+        .ri-external-link-line {
+            margin-left: auto;
+            font-size: 0.8em;
+        }
+    }
+}
+.page-applications-settings {
+    .application-catalog-source-item {
+        position: relative;
+        padding: 10px;
+        margin-bottom: 10px;
+        border-radius: var(--borderRadius);
+        background: var(--surfaceAlt1Color);
+    }
+}
+.application-panel {
+    .application-panel-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .application-info-row {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        padding: 4px 0;
+        > span {
+            flex-shrink: 0;
+            width: 130px;
+        }
+        .content {
+            min-width: 0;
+            word-break: break-word;
+        }
+    }
+    .application-versions .list-item .content {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .application-scopes {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 5px;
+    }
+    .tab-item[disabled] {
+        cursor: not-allowed;
+        opacity: 0.5;
+    }
+    .oauth2-secret-rows {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .oauth2-secret-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: var(--borderRadius);
+        background: var(--surfaceAlt1Color);
+        > span {
+            flex-shrink: 0;
+            width: 100px;
+        }
+        code {
+            flex-grow: 1;
+            min-width: 0;
+            word-break: break-all;
+            background: none;
+            padding: 0;
+        }
+    }
+}
+.application-create-modal {
+    .application-manifest-input {
+        width: 100%;
+        min-height: 240px;
+        font-family: var(--monospaceFontFamily);
+        font-size: var(--smFontSize);
+    }
+}
+.application-panel {
+    .application-update-alert {
+        align-items: center;
+    }
+    .application-webhook-item .content {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+    .application-catalog-scopes .list-item .content {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+}
