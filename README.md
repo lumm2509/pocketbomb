@@ -1,103 +1,164 @@
 <p align="center">
     <a href="https://pocketbase.io" target="_blank" rel="noopener">
-        <img src="https://i.imgur.com/aCBbjKx.png" alt="PocketBase - open source backend in 1 file" />
+        <img src="https://i.imgur.com/aCBbjKx.png" alt="PocketBomb - backend in 1 file (PocketBase fork)" />
     </a>
 </p>
 
 <p align="center">
-    <a href="https://github.com/lumm2509/pocketbomb/actions/workflows/release.yaml" target="_blank" rel="noopener"><img src="https://github.com/lumm2509/pocketbomb/actions/workflows/release.yaml/badge.svg" alt="build" /></a>
-    <a href="https://github.com/lumm2509/pocketbomb/releases" target="_blank" rel="noopener"><img src="https://img.shields.io/github/release/pocketbase/pocketbase.svg" alt="Latest releases" /></a>
-    <a href="https://pkg.go.dev/github.com/lumm2509/pocketbomb" target="_blank" rel="noopener"><img src="https://godoc.org/github.com/lumm2509/pocketbomb?status.svg" alt="Go package documentation" /></a>
+    <a href="https://pkg.go.dev/github.com/lumm2509/pocketbomb" target="_blank" rel="noopener"><img src="https://pkg.go.dev/badge/github.com/lumm2509/pocketbomb.svg" alt="Go package documentation" /></a>
+    <a href="LICENSE.md" target="_blank" rel="noopener"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+    <img src="https://img.shields.io/badge/status-alpha-orange.svg" alt="Status: alpha" />
 </p>
 
-[PocketBase](https://pocketbase.io) is an open source Go backend that includes:
+# PocketBomb
+
+PocketBomb is a **fork of [PocketBase](https://github.com/pocketbase/pocketbase)** that keeps
+the single-file Go backend model while extending it with a GraphQL read API, an
+OAuth2/OIDC-only auth system with RBAC, API keys, applications/extensions, webhooks
+and an LLM API.
+
+The inherited PocketBase foundation is still there:
 
 - embedded database (_SQLite_) with **realtime subscriptions**
 - built-in **files and users management**
-- convenient **Admin dashboard UI**
-- and simple **REST-ish API**
-
-**For documentation and examples, please visit https://pocketbase.io/docs.**
+- convenient **dashboard UI**
+- simple **REST-ish API**
+- **Go framework/toolkit** and **JSVM** hooks/migrations
 
 > [!WARNING]
-> Please keep in mind that PocketBase is still under active development
-> and therefore full backward compatibility is not guaranteed before reaching v1.0.0.
+> PocketBomb is under active development and is **not production-ready**.
+> Full backward compatibility is not guaranteed before v1.0.0 and the fork may
+> intentionally diverge from upstream PocketBase.
 
-## API SDK clients
+## Status of the fork
 
-The easiest way to interact with the PocketBase Web APIs is to use one of the official SDK clients:
+PocketBomb tracks the upstream PocketBase core but is **not a drop-in replacement**
+for every upstream feature. The main differences at the moment are:
 
-- **JavaScript - [pocketbase/js-sdk](https://github.com/pocketbase/js-sdk)** (_Browser, Node.js, React Native_)
-- **Dart - [pocketbase/dart-sdk](https://github.com/pocketbase/dart-sdk)** (_Web, Mobile, Desktop, CLI_)
+| Area | Status in PocketBomb |
+|------|----------------------|
+| GraphQL read API | Built-in, enabled by default at `/api/graphql` (queries only, Relay connections, introspection, depth/cost limits). |
+| Auth | Vanilla PocketBase auth was replaced by **OAuth2/OIDC** (authorization code + PKCE, refresh rotation, token exchange, hosted login/consent pages). |
+| Authorization | Real **RBAC** with the built-in `Owner` role, staff roles, per-collection/system permissions and scopes. |
+| API keys | Public and private keys bound to OAuth2 clients, with allowed origins, buyer IP and permission ceilings. |
+| Applications | Application catalog, manifests, installs/uninstalls, managed OAuth2 clients and dashboard extensions. |
+| Other additions | Webhooks, LLM API, sessions/impersonation, staff management. |
 
-You could also check the recommendations in https://pocketbase.io/docs/how-to-use/.
+Because of the auth changes, the **upstream auth/REST auth documentation does not apply
+as-is**. Use this repository as the source of truth for the fork-specific behavior.
 
+## Quick start
 
-## Overview
+### Standalone executable
 
-### Use as standalone app
+If a release is available for your platform, download it from the
+[Releases page](https://github.com/lumm2509/pocketbomb/releases), extract the archive
+and run `./pocketbase serve` in the extracted directory.
 
-You could download the prebuilt executable for your platform from the [Releases page](https://github.com/lumm2509/pocketbomb/releases).
-Once downloaded, extract the archive and run `./pocketbase serve` in the extracted directory.
+You can also build the example server locally:
 
-The prebuilt executables are based on the [`examples/base/main.go` file](https://github.com/lumm2509/pocketbomb/blob/master/examples/base/main.go) and comes with the JS VM plugin enabled by default which allows to extend PocketBase with JavaScript (_for more details please refer to [Extend with JavaScript](https://pocketbase.io/docs/js-overview/)_).
+```sh
+go run ./examples/base serve
+```
+
+The server starts on `http://127.0.0.1:8090` with the embedded dashboard UI. On the
+first run you will be asked to create the initial `Owner`.
+
+The prebuilt executables are based on [`examples/base/main.go`](examples/base/main.go)
+and include the JSVM plugin enabled by default.
 
 ### Use as a Go framework/toolkit
 
-PocketBase is distributed as a regular Go library package which allows you to build
-your own custom app specific business logic and still have a single portable executable at the end.
+PocketBomb is distributed as a regular Go library package which allows you to build
+your own custom app-specific business logic and still have a single portable executable.
 
-Here is a minimal example:
+Here is a minimal example that also hooks into the GraphQL API:
 
-0. [Install Go 1.27+](https://go.dev/doc/install) (_if you haven't already_)
+```go
+package main
 
-1. Create a new project directory with the following `main.go` file inside it:
-    ```go
-    package main
+import (
+    "log"
 
-    import (
-        "log"
+    "github.com/lumm2509/pocketbomb"
+    "github.com/lumm2509/pocketbomb/core"
+)
 
-        "github.com/lumm2509/pocketbomb"
-        "github.com/lumm2509/pocketbomb/core"
-    )
+func main() {
+    app := pocketbomb.New()
 
-    func main() {
-        app := pocketbase.New()
-
-        app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-            // registers new "GET /hello" route
-            se.Router.GET("/hello", func(re *core.RequestEvent) error {
-                return re.String(200, "Hello world!")
-            })
-
-            return se.Next()
+    app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+        // registers a new "GET /hello" route
+        se.Router.GET("/hello", func(re *core.RequestEvent) error {
+            return re.String(200, "Hello world!")
         })
 
-        if err := app.Start(); err != nil {
-            log.Fatal(err)
-        }
+        return se.Next()
+    })
+
+    // the GraphQL read API is registered automatically at /api/graphql
+    // (see Settings -> GraphQL). This hook can inspect, rewrite or
+    // short-circuit the incoming GraphQL operations.
+    app.OnGraphQLRequest().BindFunc(func(e *core.GraphQLRequestEvent) error {
+        app.Logger().Info("GraphQL request", "operation", e.OperationName)
+        return e.Next()
+    })
+
+    if err := app.Start(); err != nil {
+        log.Fatal(err)
     }
-    ```
-
-2. To init the dependencies, run `go mod init myapp && go mod tidy`.
-
-3. To start the application, run `go run main.go serve`.
-
-4. To build a statically linked executable, you can run `CGO_ENABLED=0 go build` and then start the created executable with `./myapp serve`.
-
-_For more details please refer to [Extend with Go](https://pocketbase.io/docs/go-overview/)._
-
-### Building and running the repo main.go example
-
-To build the minimal standalone executable, like the prebuilt ones in the releases page, you can simply run `go build` inside the `examples/base` directory:
+}
+```
 
 0. [Install Go 1.27+](https://go.dev/doc/install) (_if you haven't already_)
-1. Clone/download the repo
-2. Navigate to `examples/base`
-3. Run `CGO_ENABLED=0 go build` to build a binary for your current environment
-   _(or to target other platforms use `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build`; see https://go.dev/doc/install/source#environment)_
-4. Start the created executable by running `./base serve`.
+1. Save the file above as `main.go` in a new project directory.
+2. Run `go mod init myapp && go mod tidy`.
+3. Run `go run main.go serve`.
+4. To build a statically linked executable, run `CGO_ENABLED=0 go build` and start it with `./myapp serve`.
+
+### GraphQL API
+
+The GraphQL API is **read-only** and is generated from the regular collections that are
+reachable through the REST API (i.e. those with a public `listRule` or `viewRule`).
+It is enabled by default and can be configured from **Settings -> GraphQL** in the dashboard.
+
+- Endpoint: `GET|POST /api/graphql`
+- Schema/introspection report: `GET /api/graphql/collections`
+- Requests must identify a client with an API key (`X-PB-Public-Key` or
+  `X-PB-Private-Key` + `X-PB-Buyer-IP`) or with an OAuth2 access token.
+- Only queries are accepted; mutations and subscriptions are rejected.
+- Default limits: max depth `10`, max cost `1000`, max page size `250`, max query size `32KB`,
+  request timeout `10s`.
+
+Example query using a public API key:
+
+```sh
+curl -X POST http://127.0.0.1:8090/api/graphql \
+  -H "Content-Type: application/json" \
+  -H "X-PB-Public-Key: YOUR_PUBLIC_KEY" \
+  -d '{
+    "query": "query { posts(first: 10, sort: \"-created\") { totalCount nodes { id title } pageInfo { hasNextPage endCursor } } }"
+  }'
+```
+
+Collections are exposed using Relay-style connections (`FooConnection { edges { cursor node } nodes pageInfo }`),
+a singular query (`post(id: ...)` or by a unique field) and a global `node(id: ...)` lookup.
+The schema follows the collection names but may normalize them to valid GraphQL names; use
+`GET /api/graphql/collections` (requires collections read permission) or introspection to
+discover the generated types and fields.
+
+The `OnGraphQLRequest` hook is available in Go and JSVM to inspect or modify the query,
+variables and operation name, or to short-circuit the request.
+
+### Building and running the repo example
+
+1. [Install Go 1.27+](https://go.dev/doc/install) (_if you haven't already_)
+2. Clone/download the repo
+3. Navigate to `examples/base`
+4. Run `CGO_ENABLED=0 go build` to build a binary for your current environment
+   (_or target other platforms with `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build`;
+   see https://go.dev/doc/install/source#environment_)
+5. Start the executable with `./base serve`
 
 Note that the supported build targets by the pure Go SQLite driver at the moment are:
 
@@ -126,38 +187,45 @@ Note that the supported build targets by the pure Go SQLite driver at the moment
 
 ### Testing
 
-PocketBase comes with mixed bag of unit and integration tests.
-To run them, use the standard `go test` command:
+PocketBomb comes with a mix of unit and integration tests. To run them, use the standard
+`go test` command:
 
 ```sh
 go test ./...
+
+# or using the Makefile
+make test
 ```
 
-Check also the [Testing guide](http://pocketbase.io/docs/testing) to learn how to write your own custom application tests.
+The fork-specific dashboard/auth/GraphQL flows are also covered by the browser end-to-end
+suite in `.tmp/e2e` (kept out of version control). See `.tmp/e2e/README.md` for details.
+
+## Documentation
+
+- Upstream PocketBase docs: https://pocketbase.io/docs
+  These are useful for the shared foundation (collections, records, files, realtime,
+  JSVM, migrations), but **auth and some APIs differ in this fork**.
+- GraphQL settings and the generated schema are documented in the dashboard
+  (**Settings -> GraphQL** and the collection **GraphQL** tab).
 
 ## Security
 
-If you discover a security vulnerability within PocketBase, please send an e-mail to **support at pocketbase.io**.
-
-You could find more details in the project [Security policy](https://github.com/lumm2509/pocketbomb/security/policy).
+If you discover a security vulnerability that is specific to PocketBomb, please report it
+through the [fork's issue tracker](https://github.com/lumm2509/pocketbomb/issues) without
+publishing exploit details. For vulnerabilities that also affect upstream PocketBase,
+follow the [upstream security policy](https://github.com/pocketbase/pocketbase/security/policy).
 
 ## Contributing
 
-PocketBase is free and open source project licensed under the [MIT License](LICENSE.md).
+PocketBomb is free and open source software licensed under the [MIT License](LICENSE.md).
 You are free to do whatever you want with it, even offering it as a paid service.
 
-You could help continuing its development by:
+Before opening a PR, please:
 
-- [Contribute to the source code](CONTRIBUTING.md)
-- [Suggest new features and report issues](https://github.com/lumm2509/pocketbomb/issues)
+- read [CONTRIBUTING.md](CONTRIBUTING.md);
+- add or update tests for your change (`go test ./...`, `make lint`);
+- open an issue first for larger features or behavioral changes so the design can be discussed.
 
-Please refrain creating PRs for _new features_ without previously discussing the implementation details.
-PocketBase has a [roadmap](https://github.com/orgs/pocketbase/projects/2) and I try to work on issues in specific order and such PRs often come in out of nowhere and skew all initial planning with tedious back-and-forth communication.
+## License
 
-Don't get upset if I close your PR, even if it is well executed and tested. This doesn't mean that it will never be merged.
-Later we can always refer to it and/or take pieces of your implementation when the time comes to work on the issue (don't worry you'll be credited in the release notes).
-
-> [!IMPORTANT]
-> Due to recent LLM spam, PRs are temporary disabled and only existing collaborators can open a PR.
-> If you stumble on a problem that you want to fix, please consider instead opening an issue or discussion with link to your fork _(if not obvious - LLM contributions are not welcome)_.
-> This status may change in the future in case GitHub finally decide to do something about the constant spam, or when I find time to move the project somewhere else.
+[MIT](LICENSE.md). PocketBomb is a fork of PocketBase, which is also MIT licensed.

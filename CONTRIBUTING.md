@@ -1,48 +1,55 @@
-# Contributing to PocketBase
+# Contributing to PocketBomb
 
-> [!IMPORTANT]
-> Due to recent LLM spam, PRs are temporary disabled and only existing collaborators can open a PR.
-> If you stumble on a problem that you want to fix, please consider instead opening an issue or discussion with link to your fork _(if not obvious - LLM contributions are not welcome)_.
-> This status may change in the future in case GitHub finally decide to do something about the constant spam, or when I find time to move the project somewhere else.
+PocketBomb is a fork of [PocketBase](https://github.com/pocketbase/pocketbase). Contributions
+are welcome, but the project is still pre-1.0 and the fork-specific behavior (OAuth2-only auth,
+RBAC, GraphQL, applications, webhooks, LLM) is changing quickly.
 
-This document describes how to prepare a PR for a change in the main repository.
+For larger features or behavioral changes, please open an issue first so the design can be
+discussed before you spend time on an implementation. Small bug fixes and documentation
+improvements can go straight to a PR.
 
 - [Prerequisites](#prerequisites)
 - [Making changes in the Go code](#making-changes-in-the-go-code)
-- [Making changes in the Superuser UI](#making-changes-in-the-admin-ui)
+- [Making changes in the dashboard UI](#making-changes-in-the-dashboard-ui)
 
 ## Prerequisites
 
 - Go 1.27+ (for making changes in the Go code)
-- Node 24+ (for making changes in the Superuser UI)
+- Node 24+ (for making changes in the dashboard UI)
 
-If you haven't already, you can fork the main repository and clone your fork so that you can work locally:
+If you haven't already, fork the repository and clone your fork so that you can work locally:
 
-```
-git clone https://github.com/your_username/pocketbase.git
+```sh
+git clone https://github.com/your_username/pocketbomb.git
 ```
 
 > [!IMPORTANT]
-> It is recommended to create a new branch from master for each of your bugfixes and features.
-> This is required if you are planning to submit multiple PRs in order to keep the changes separate for review until they eventually get merged.
+> It is recommended to create a new branch from master for each bugfix or feature.
 
 ## Making changes in the Go code
 
-PocketBase is distributed as a Go package, which means that in order to run the project you'll have to create a Go `main` program that imports the package.
+PocketBomb is distributed as a Go package, which means that in order to run the project you'll
+have to create a Go `main` program that imports the package.
 
-The repository already includes such program, located in `examples/base`, that is also used for the prebuilt executables.
+The repository already includes such a program, located in `examples/base`, which is also used
+for the prebuilt executables and as the reference for the available plugins.
 
-So, let's assume that you already done some changes in the PocketBase Go code and you want now to run them:
+So, let's assume that you already made some changes in the PocketBomb Go code and you want to
+run them:
 
 1. Navigate to `examples/base`
 2. Run `go run main.go serve`
 
-This will start a web server on `http://localhost:8090` with the embedded prebuilt Superuser UI from `ui/dist`. And that's it!
+This starts a web server on `http://localhost:8090` with the embedded prebuilt dashboard UI
+from `ui/dist`.
 
-**Before making a PR to the main repository, it is a good idea to:**
+The GraphQL read API is registered automatically at `/api/graphql`; `examples/base/main.go`
+also contains a small `OnGraphQLRequest` hook example. GraphQL behavior is covered by the
+tests in `apis/graphql*.go` and by the browser scenario `.tmp/e2e/scenarios/16_graphql.js`.
 
-- Add unit/integration tests for your changes (we are using the standard `testing` go package).
-  To run the tests, you could execute (while in the root project directory):
+**Before making a PR, it is a good idea to:**
+
+- Add unit/integration tests for your changes (we use the standard `testing` package):
 
   ```sh
   go test ./...
@@ -60,26 +67,38 @@ This will start a web server on `http://localhost:8090` with the embedded prebui
   make lint
   ```
 
-## Making changes in the Superuser UI
+- If you change the JSVM bindings or public Go API, regenerate the JSVM types:
 
-PocketBase Superuser UI is a single-page application (SPA) built with Svelte and Vite.
+  ```sh
+  make jstypes
+  ```
 
-To start the Superuser UI:
+## Making changes in the dashboard UI
+
+The PocketBomb dashboard UI is a single-page application (SPA) built with Svelte and Vite.
+
+To start the dashboard UI:
 
 1. Navigate to the `ui` project directory
 2. Run `npm install` to install the node dependencies
-3. Start vite's dev server
+3. Start Vite's dev server:
+
    ```sh
    npm run dev
    ```
 
-You could open the browser and access the running Superuser UI at `http://localhost:5173`.
+You can open the dashboard at `http://localhost:5173`.
 
-Since the Superuser UI is just a client-side application, you need to have the PocketBase backend server also running in the background (either manually running the `examples/base/main.go` or download a prebuilt executable).
+Since the dashboard is a client-side application, you need the PocketBomb backend running in
+the background (either manually running `examples/base/main.go` or a prebuilt executable).
 
 > [!NOTE]
-> By default, the Superuser UI is expecting the backend server to be started at `http://localhost:8090`, but you could change that by creating a new `ui/.env.development.local` file with `PB_BACKEND_URL = YOUR_ADDRESS` variable inside it.
+> By default, the dashboard expects the backend at `http://localhost:8090`, but you can change
+> that by creating a new `ui/.env.development.local` file with a `PB_BACKEND_URL = YOUR_ADDRESS`
+> variable inside it.
 
-Every change you make in the Superuser UI should be automatically reflected in the browser at `http://localhost:5173` without reloading the page.
+Every change you make in the dashboard UI should be automatically reflected in the browser
+without reloading the page.
 
-Once you are done with your changes, you have to build the Superuser UI with `npm run build`, so that it can be embedded in the go package. And that's it - you can make your PR to the main PocketBase repository.
+Once you are done with your changes, build the dashboard with `npm run build` so that it can be
+embedded in the Go package, then submit your PR.

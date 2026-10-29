@@ -1,5 +1,11 @@
 # Security
 
+> [!NOTE]
+> PocketBomb is a fork of PocketBase. The policy below is inherited from upstream and describes
+> how upstream PocketBase handles reports. If the issue is specific to this fork (GraphQL,
+> OAuth2/OIDC auth, RBAC, applications, webhooks, LLM), please report it via the
+> [fork's issue tracker](https://github.com/lumm2509/pocketbomb/issues) instead.
+
 **Keep in mind that PocketBase is a non-commercial open source project, maintained entirely on volunteer basis (there is no company or dedicated team behind it), and there are no bounties!**
 
 If you want to responsibly report a security issue you'll have to reach out as a human to **support at pocketbase.io**.
