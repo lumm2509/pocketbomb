@@ -172,6 +172,17 @@ func (group *RouterGroup[T]) OPTIONS(path string, action func(e T) error) *Route
 	return group.Route(http.MethodOptions, path, action)
 }
 
+// FindRoute returns the direct child route of the current group with the exact method and path (if any).
+func (group *RouterGroup[T]) FindRoute(method string, path string) *Route[T] {
+	for _, child := range group.children {
+		if route, ok := child.(*Route[T]); ok && route.Method == method && route.Path == path {
+			return route
+		}
+	}
+
+	return nil
+}
+
 // HasRoute checks whether the specified route pattern (method + path)
 // is registered in the current group or its children.
 //
