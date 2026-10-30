@@ -17,6 +17,8 @@
 //	X-PB-Event-Id:     the event id (same across retries and redeliveries; use it for deduplication)
 //	X-PB-Triggered-At: the event time (RFC3339 with milliseconds, UTC)
 //	X-PB-Api-Version:  the payload api version
+//	X-PB-Application-Installation, X-PB-Issuer: the application installation id and the issuer
+//	                   of the managed (application installation) webhooks only (not signed)
 //	User-Agent:        PocketBase-Webhooks
 //
 // Receiver example (Go):
@@ -54,6 +56,13 @@ const (
 	HeaderTriggeredAt = "X-PB-Triggered-At"
 	HeaderApiVersion  = "X-PB-Api-Version"
 	HeaderTest        = "X-PB-Test"
+
+	// HeaderApplicationInstallation and HeaderIssuer identify the application installation of a
+	// managed (application installation) webhook delivery: the installation id and the
+	// _applicationInstallations issuer identifier of the instance (they are not part of the signed
+	// content; the receiver verifies the body signature with the secret of that installation).
+	HeaderApplicationInstallation = "X-PB-Application-Installation"
+	HeaderIssuer                  = "X-PB-Issuer"
 
 	DefaultUserAgent = "PocketBase-Webhooks"
 )

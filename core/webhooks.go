@@ -231,6 +231,15 @@ func (w *Webhooks) sendDelivery(ctx context.Context, d *webhooks.Delivery, isTes
 		req.Header.Set(webhooks.HeaderTest, "true")
 	}
 
+	// the managed webhooks of an application installation identify the installation
+	// (a multi-instance application selects the installation webhook secret with them)
+	if installationId := webhook.ApplicationInstallationRef(); installationId != "" {
+		req.Header.Set(webhooks.HeaderApplicationInstallation, installationId)
+		if collection, err := w.app.FindCachedCollectionByNameOrId(CollectionNameApplicationInstallations); err == nil {
+			req.Header.Set(webhooks.HeaderIssuer, OAuth2Issuer(w.app, collection))
+		}
+	}
+
 	event := new(WebhookSendEvent)
 	event.App = w.app
 	event.Webhook = webhook

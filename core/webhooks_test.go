@@ -1256,3 +1256,104 @@ func TestWebhooksBootstrapClearInsideTransaction(t *testing.T) {
 
 	app.Cleanup()
 }
+
+func TestWebhookManagedInstallationHeaders(t *testing.T) {
+	t.Parallel()
+
+	app := newWebhooksTestApp(t)
+	defer app.Cleanup()
+
+	plainReceiver := newWebhookReceiver("")
+	defer plainReceiver.Close()
+
+	managedReceiver := newWebhookReceiver("")
+	defer managedReceiver.Close()
+
+	// a regular subscription (no installation headers)
+	plain := createTestWebhook(t, app, plainReceiver.URL+"/plain", []string{"demo2.create"}, nil)
+	plainReceiver.mu.Lock()
+	plainReceiver.secret = plain.Secret()
+	plainReceiver.mu.Unlock()
+
+	// an application installation with a managed subscription of the same topic
+	demo2, err := app.FindCollectionByNameOrId("demo2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manifest, err := core.ParseApplicationManifest([]byte(`{
+		"handle":"managed-headers",
+		"name":"Managed headers",
+		"version":"1.0.0",
+		"application_url":"`+managedReceiver.URL+`",
+		"access":{"scopes":["read_demo2"]},
+		"webhooks":{"subscriptions":[{"topics":["demo2.create"],"uri":"`+managedReceiver.URL+`/managed"}]}
+	}`), core.ApplicationManifestFormatJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	imported, err := app.ImportApplicationManifest(manifest, core.ApplicationManifestFormatJSON, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	installed, err := app.InstallApplication(imported.Application, core.Permissions{
+		Collections: map[string][]string{demo2.Id: {core.PermissionActionList, core.PermissionActionView}},
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	managedReceiver.mu.Lock()
+	managedReceiver.secret = installed.WebhookSecret
+	managedReceiver.mu.Unlock()
+
+	managed, err := app.FindAllWebhooksByApplicationInstallation(installed.Installation.Id)
+	if err != nil || len(managed) != 1 {
+		t.Fatalf("Expected 1 managed webhook, got %d (%v)", len(managed), err)
+	}
+	if managed[0].ApplicationInstallationRef() != installed.Installation.Id || plain.ApplicationInstallationRef() != "" {
+		t.Fatalf("Unexpected ApplicationInstallationRef %q / %q", managed[0].ApplicationInstallationRef(), plain.ApplicationInstallationRef())
+	}
+
+	saveTestRecord(t, app, "demo2", map[string]any{"title": "managed headers"})
+	app.Webhooks().FlushEvents()
+
+	if n, err := app.Webhooks().ProcessDue(context.Background(), 10); n != 2 || err != nil {
+		t.Fatalf("Expected 2 processed deliveries, got %d (%v)", n, err)
+	}
+
+	installations, err := app.FindCollectionByNameOrId(core.CollectionNameApplicationInstallations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedIssuer := core.OAuth2Issuer(app, installations)
+
+	managedRequests := managedReceiver.received()
+	if len(managedRequests) != 1 || !managedRequests[0].valid {
+		t.Fatalf("Expected 1 valid managed delivery, got %d", len(managedRequests))
+	}
+	h := managedRequests[0].header
+	if v := h.Get(webhooks.HeaderApplicationInstallation); v != installed.Installation.Id {
+		t.Fatalf("Expected the installation header %q, got %q", installed.Installation.Id, v)
+	}
+	if v := h.Get(webhooks.HeaderIssuer); v != expectedIssuer || !strings.HasSuffix(v, "/oauth2/"+core.CollectionNameApplicationInstallations) {
+		t.Fatalf("Expected the issuer header %q, got %q", expectedIssuer, v)
+	}
+
+	plainRequests := plainReceiver.received()
+	if len(plainRequests) != 1 || !plainRequests[0].valid {
+		t.Fatalf("Expected 1 valid plain delivery, got %d", len(plainRequests))
+	}
+	for _, name := range []string{webhooks.HeaderApplicationInstallation, webhooks.HeaderIssuer} {
+		if _, ok := plainRequests[0].header[http.CanonicalHeaderKey(name)]; ok {
+			t.Fatalf("Expected no %s header for a regular subscription", name)
+		}
+	}
+
+	// the signature still covers only the body (the installation headers are informational)
+	if !webhooks.CheckSignature(managedRequests[0].body, installed.WebhookSecret, h.Get(webhooks.HeaderHmac)) {
+		t.Fatal("Expected the body signature with the installation webhook secret")
+	}
+}

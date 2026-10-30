@@ -229,6 +229,12 @@ func (m *Webhook) SetClient(clientId string) {
 	m.Set("client", clientId)
 }
 
+// ApplicationInstallationRef returns the "applicationInstallationRef" record field value
+// (the application installation of a managed webhook; empty for the regular subscriptions).
+func (m *Webhook) ApplicationInstallationRef() string {
+	return m.GetString("applicationInstallationRef")
+}
+
 // ActorRef returns the "actorRef" record field value, aka. the actor that last created
 // or changed the subscription in the "{collectionId}:{recordId}" format
 // (see [WebhookActorRef] and [WebhookChangeActorRef]).
