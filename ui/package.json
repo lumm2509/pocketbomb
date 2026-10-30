@@ -7,8 +7,8 @@
         "build": "dprint fmt && vite build"
     },
     "dependencies": {
-        "leaflet": "^1.9.4",
-        "pocketbase": "file:../../pocketbase-js-sdk"
+        "@pocketbomb/primer": "file:../../pocketbomb-js/packages/primer",
+        "leaflet": "^1.9.4"
     },
     "devDependencies": {
         "dprint": "^0.52.0",

@@ -1,4 +1,4 @@
-import { getTokenPayload, isTokenExpired } from "pocketbase";
+import { getTokenPayload, isTokenExpired } from "@pocketbomb/primer";
 
 export function pageInstaller(route) {
     const token = route.params?.token || "";

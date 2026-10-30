@@ -1,10 +1,11 @@
-import { createAccountClient, LocalAuthStore } from "pocketbase";
+import { LocalAuthStore } from "@pocketbomb/primer";
+import { createDashboardClient as createDashboardAccountClient } from "@pocketbomb/primer/internal";
 
 // Dashboard OAuth2 (Authorization Code + PKCE) client of the _superusers issuer.
 //
 // The OAuth2 flow itself (PKCE, callback, cross-tab refresh with navigator.locks and
 // the localStorage lease fallback, logout guard, impersonation token exchange) is
-// implemented by the SDK account client (createAccountClient / pb.account).
+// implemented by @pocketbomb/primer (the dashboard account client / app.pb.account).
 // This module contains only the dashboard specific glue:
 //   - the built-in pb_dashboard client configuration (same-origin redirect URI)
 //   - the "return to the previous dashboard page" state and the callback URL cleanup
@@ -23,19 +24,20 @@ export function dashboardRedirectURI() {
 }
 
 /**
- * Creates the dashboard SDK client (pb_dashboard account client of the _superusers issuer).
+ * Creates the dashboard client (pb_dashboard account client of the _superusers issuer
+ * with the dashboard internal services of @pocketbomb/primer/internal).
  *
  * The OAuth2 state (access token, record, refresh token, id_token) is stored
  * in localStorage and shared between the dashboard tabs.
  *
  * @param  {string} url The PocketBase backend URL.
- * @return {PocketBase}
+ * @return {import("@pocketbomb/primer/internal").DashboardClient}
  */
 export function createDashboardClient(url) {
     // concatenate the path in case hosted under subpath alongside other apps
     const path = window.location.pathname;
 
-    return createAccountClient({
+    return createDashboardAccountClient({
         url,
         collection: DASHBOARD_ISSUER_COLLECTION,
         clientId: DASHBOARD_CLIENT_ID,
@@ -104,5 +106,5 @@ export async function handleCallback() {
  * @return {Promise<Object>} The token response.
  */
 export function impersonate(record) {
-    return app.pb.account.impersonate(record.collectionName, record.id);
+    return app.pb.impersonate(record.collectionName, record.id);
 }

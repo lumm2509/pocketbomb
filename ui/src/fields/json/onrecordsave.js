@@ -1,4 +1,4 @@
-import { ClientResponseError } from "pocketbase";
+import { ClientResponseError } from "@pocketbomb/primer";
 
 // {
 //     originalRecord: undefined,
