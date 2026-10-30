@@ -83,6 +83,9 @@ func Register(app core.App, rootCmd *cobra.Command, config Config) error {
 		p.app.OnCollectionCreateRequest().BindFunc(p.automigrateOnCollectionChange)
 		p.app.OnCollectionUpdateRequest().BindFunc(p.automigrateOnCollectionChange)
 		p.app.OnCollectionDeleteRequest().BindFunc(p.automigrateOnCollectionChange)
+
+		p.app.OnGraphQLSchemaApplyRequest().BindFunc(p.automigrateOnGraphQLSchemaApply)
+		p.app.Store().Set(core.StoreKeyGraphQLSchemaMigrationWriter, true)
 	}
 
 	return nil
