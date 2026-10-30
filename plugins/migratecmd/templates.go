@@ -145,18 +145,47 @@ func (p *plugin) jsDiffTemplate(new *core.Collection, old *core.Collection) (str
 		return p.jsCreateTemplate(new)
 	}
 
+	up, down, err := p.jsDiffParts(new, old)
+	if err != nil {
+		return "", err
+	}
+
+	const template = jsTypesDirective + `migrate((app) => {
+  const collection = app.findCollectionByNameOrId(%q)
+
+  %s
+
+  return app.save(collection)
+}, (app) => {
+  const collection = app.findCollectionByNameOrId(%q)
+
+  %s
+
+  return app.save(collection)
+})
+`
+
+	return fmt.Sprintf(
+		template,
+		old.Id, up,
+		new.Id, down,
+	), nil
+}
+
+// jsDiffParts returns the up and down statements that change the "collection" variable from old to new.
+func (p *plugin) jsDiffParts(new *core.Collection, old *core.Collection) (string, string, error) {
 	upParts := []string{}
 	downParts := []string{}
 	varName := "collection"
 
 	newMap, err := toMap(new)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	oldMap, err := toMap(old)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// non-fields
@@ -168,12 +197,12 @@ func (p *plugin) jsDiffTemplate(new *core.Collection, old *core.Collection) (str
 
 		rawUpDiff, err := marhshalWithoutEscape(upDiff, "  ", "  ")
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		rawDownDiff, err := marhshalWithoutEscape(downDiff, "  ", "  ")
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		upParts = append(upParts, "// update collection data")
@@ -188,12 +217,12 @@ func (p *plugin) jsDiffTemplate(new *core.Collection, old *core.Collection) (str
 
 	oldFieldsSlice, ok := oldMap["fields"].([]any)
 	if !ok {
-		return "", errors.New(`oldMap["fields"] is not []any`)
+		return "", "", errors.New(`oldMap["fields"] is not []any`)
 	}
 
 	newFieldsSlice, ok := newMap["fields"].([]any)
 	if !ok {
-		return "", errors.New(`newMap["fields"] is not []any`)
+		return "", "", errors.New(`newMap["fields"] is not []any`)
 	}
 
 	// deleted fields
@@ -204,7 +233,7 @@ func (p *plugin) jsDiffTemplate(new *core.Collection, old *core.Collection) (str
 
 		rawOldField, err := marhshalWithoutEscape(oldFieldsSlice[i], "  ", "  ")
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		upParts = append(upParts, "// remove field")
@@ -222,7 +251,7 @@ func (p *plugin) jsDiffTemplate(new *core.Collection, old *core.Collection) (str
 
 		rawNewField, err := marhshalWithoutEscape(newFieldsSlice[i], "  ", "  ")
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		upParts = append(upParts, "// add field")
@@ -239,7 +268,7 @@ func (p *plugin) jsDiffTemplate(new *core.Collection, old *core.Collection) (str
 
 		rawNewField, err = marhshalWithoutEscape(newFieldsSlice[i], "  ", "  ")
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		var oldFieldIndex int
@@ -248,7 +277,7 @@ func (p *plugin) jsDiffTemplate(new *core.Collection, old *core.Collection) (str
 			if oldField.GetId() == newField.GetId() {
 				rawOldField, err = marhshalWithoutEscape(oldFieldsSlice[j], "  ", "  ")
 				if err != nil {
-					return "", err
+					return "", "", err
 				}
 				oldFieldIndex = j
 				break
@@ -269,32 +298,10 @@ func (p *plugin) jsDiffTemplate(new *core.Collection, old *core.Collection) (str
 	// -----------------------------------------------------------------
 
 	if len(upParts) == 0 && len(downParts) == 0 {
-		return "", ErrEmptyTemplate
+		return "", "", ErrEmptyTemplate
 	}
 
-	up := strings.Join(upParts, "\n  ")
-	down := strings.Join(downParts, "\n  ")
-
-	const template = jsTypesDirective + `migrate((app) => {
-  const collection = app.findCollectionByNameOrId(%q)
-
-  %s
-
-  return app.save(collection)
-}, (app) => {
-  const collection = app.findCollectionByNameOrId(%q)
-
-  %s
-
-  return app.save(collection)
-})
-`
-
-	return fmt.Sprintf(
-		template,
-		old.Id, strings.TrimSpace(up),
-		new.Id, strings.TrimSpace(down),
-	), nil
+	return strings.TrimSpace(strings.Join(upParts, "\n  ")), strings.TrimSpace(strings.Join(downParts, "\n  ")), nil
 }
 
 // -------------------------------------------------------------------
@@ -490,135 +497,11 @@ func (p *plugin) goDiffTemplate(new *core.Collection, old *core.Collection) (str
 		return p.goCreateTemplate(new)
 	}
 
-	upParts := []string{}
-	downParts := []string{}
-	varName := "collection"
-
-	newMap, err := toMap(new)
+	up, down, err := p.goDiffParts(new, old)
 	if err != nil {
 		return "", err
 	}
 
-	oldMap, err := toMap(old)
-	if err != nil {
-		return "", err
-	}
-
-	// non-fields
-	// -----------------------------------------------------------------
-
-	upDiff := diffMaps(oldMap, newMap, "fields", "created", "updated")
-	if len(upDiff) > 0 {
-		downDiff := diffMaps(newMap, oldMap, "fields", "created", "updated")
-
-		rawUpDiff, err := marhshalWithoutEscape(upDiff, "\t\t", "\t")
-		if err != nil {
-			return "", err
-		}
-
-		rawDownDiff, err := marhshalWithoutEscape(downDiff, "\t\t", "\t")
-		if err != nil {
-			return "", err
-		}
-
-		upParts = append(upParts, "// update collection data")
-		upParts = append(upParts, goErrIf(fmt.Sprintf("json.Unmarshal([]byte(`%s`), &%s)", escapeBacktick(string(rawUpDiff)), varName)))
-		// ---
-		downParts = append(downParts, "// update collection data")
-		downParts = append(downParts, goErrIf(fmt.Sprintf("json.Unmarshal([]byte(`%s`), &%s)", escapeBacktick(string(rawDownDiff)), varName)))
-	}
-
-	// fields
-	// -----------------------------------------------------------------
-
-	oldFieldsSlice, ok := oldMap["fields"].([]any)
-	if !ok {
-		return "", errors.New(`oldMap["fields"] is not []any`)
-	}
-
-	newFieldsSlice, ok := newMap["fields"].([]any)
-	if !ok {
-		return "", errors.New(`newMap["fields"] is not []any`)
-	}
-
-	// deleted fields
-	for i, oldField := range old.Fields {
-		if new.Fields.GetById(oldField.GetId()) != nil {
-			continue // exist
-		}
-
-		rawOldField, err := marhshalWithoutEscape(oldFieldsSlice[i], "\t\t", "\t")
-		if err != nil {
-			return "", err
-		}
-
-		upParts = append(upParts, "// remove field")
-		upParts = append(upParts, fmt.Sprintf("%s.Fields.RemoveById(%q)\n", varName, oldField.GetId()))
-
-		downParts = append(downParts, "// add field")
-		downParts = append(downParts, goErrIf(fmt.Sprintf("%s.Fields.AddMarshaledJSONAt(%d, []byte(`%s`))", varName, i, escapeBacktick(string(rawOldField)))))
-	}
-
-	// created fields
-	for i, newField := range new.Fields {
-		if old.Fields.GetById(newField.GetId()) != nil {
-			continue // exist
-		}
-
-		rawNewField, err := marhshalWithoutEscape(newFieldsSlice[i], "\t\t", "\t")
-		if err != nil {
-			return "", err
-		}
-
-		upParts = append(upParts, "// add field")
-		upParts = append(upParts, goErrIf(fmt.Sprintf("%s.Fields.AddMarshaledJSONAt(%d, []byte(`%s`))", varName, i, escapeBacktick(string(rawNewField)))))
-
-		downParts = append(downParts, "// remove field")
-		downParts = append(downParts, fmt.Sprintf("%s.Fields.RemoveById(%q)\n", varName, newField.GetId()))
-	}
-
-	// modified fields
-	// (note currently ignoring order-only changes as it comes with too many edge-cases)
-	for i, newField := range new.Fields {
-		var rawNewField, rawOldField []byte
-
-		rawNewField, err = marhshalWithoutEscape(newFieldsSlice[i], "\t\t", "\t")
-		if err != nil {
-			return "", err
-		}
-
-		var oldFieldIndex int
-
-		for j, oldField := range old.Fields {
-			if oldField.GetId() == newField.GetId() {
-				rawOldField, err = marhshalWithoutEscape(oldFieldsSlice[j], "\t\t", "\t")
-				if err != nil {
-					return "", err
-				}
-				oldFieldIndex = j
-				break
-			}
-		}
-
-		if rawOldField == nil || bytes.Equal(rawNewField, rawOldField) {
-			continue // new field or no change
-		}
-
-		upParts = append(upParts, "// update field")
-		upParts = append(upParts, goErrIf(fmt.Sprintf("%s.Fields.AddMarshaledJSONAt(%d, []byte(`%s`))", varName, i, escapeBacktick(string(rawNewField)))))
-
-		downParts = append(downParts, "// update field")
-		downParts = append(downParts, goErrIf(fmt.Sprintf("%s.Fields.AddMarshaledJSONAt(%d, []byte(`%s`))", varName, oldFieldIndex, escapeBacktick(string(rawOldField)))))
-	}
-
-	// ---------------------------------------------------------------
-
-	if len(upParts) == 0 && len(downParts) == 0 {
-		return "", ErrEmptyTemplate
-	}
-
-	up := strings.Join(upParts, "\n\t\t")
-	down := strings.Join(downParts, "\n\t\t")
 	combined := up + down
 
 	// generate imports
@@ -666,9 +549,141 @@ func init() {
 		template,
 		filepath.Base(p.config.Dir),
 		imports,
-		old.Id, strings.TrimSpace(up),
-		new.Id, strings.TrimSpace(down),
+		old.Id, up,
+		new.Id, down,
 	), nil
+}
+
+// goDiffParts returns the up and down statements that change the "collection" variable from old to new.
+func (p *plugin) goDiffParts(new *core.Collection, old *core.Collection) (string, string, error) {
+	upParts := []string{}
+	downParts := []string{}
+	varName := "collection"
+
+	newMap, err := toMap(new)
+	if err != nil {
+		return "", "", err
+	}
+
+	oldMap, err := toMap(old)
+	if err != nil {
+		return "", "", err
+	}
+
+	// non-fields
+	// -----------------------------------------------------------------
+
+	upDiff := diffMaps(oldMap, newMap, "fields", "created", "updated")
+	if len(upDiff) > 0 {
+		downDiff := diffMaps(newMap, oldMap, "fields", "created", "updated")
+
+		rawUpDiff, err := marhshalWithoutEscape(upDiff, "\t\t", "\t")
+		if err != nil {
+			return "", "", err
+		}
+
+		rawDownDiff, err := marhshalWithoutEscape(downDiff, "\t\t", "\t")
+		if err != nil {
+			return "", "", err
+		}
+
+		upParts = append(upParts, "// update collection data")
+		upParts = append(upParts, goErrIf(fmt.Sprintf("json.Unmarshal([]byte(`%s`), &%s)", escapeBacktick(string(rawUpDiff)), varName)))
+		// ---
+		downParts = append(downParts, "// update collection data")
+		downParts = append(downParts, goErrIf(fmt.Sprintf("json.Unmarshal([]byte(`%s`), &%s)", escapeBacktick(string(rawDownDiff)), varName)))
+	}
+
+	// fields
+	// -----------------------------------------------------------------
+
+	oldFieldsSlice, ok := oldMap["fields"].([]any)
+	if !ok {
+		return "", "", errors.New(`oldMap["fields"] is not []any`)
+	}
+
+	newFieldsSlice, ok := newMap["fields"].([]any)
+	if !ok {
+		return "", "", errors.New(`newMap["fields"] is not []any`)
+	}
+
+	// deleted fields
+	for i, oldField := range old.Fields {
+		if new.Fields.GetById(oldField.GetId()) != nil {
+			continue // exist
+		}
+
+		rawOldField, err := marhshalWithoutEscape(oldFieldsSlice[i], "\t\t", "\t")
+		if err != nil {
+			return "", "", err
+		}
+
+		upParts = append(upParts, "// remove field")
+		upParts = append(upParts, fmt.Sprintf("%s.Fields.RemoveById(%q)\n", varName, oldField.GetId()))
+
+		downParts = append(downParts, "// add field")
+		downParts = append(downParts, goErrIf(fmt.Sprintf("%s.Fields.AddMarshaledJSONAt(%d, []byte(`%s`))", varName, i, escapeBacktick(string(rawOldField)))))
+	}
+
+	// created fields
+	for i, newField := range new.Fields {
+		if old.Fields.GetById(newField.GetId()) != nil {
+			continue // exist
+		}
+
+		rawNewField, err := marhshalWithoutEscape(newFieldsSlice[i], "\t\t", "\t")
+		if err != nil {
+			return "", "", err
+		}
+
+		upParts = append(upParts, "// add field")
+		upParts = append(upParts, goErrIf(fmt.Sprintf("%s.Fields.AddMarshaledJSONAt(%d, []byte(`%s`))", varName, i, escapeBacktick(string(rawNewField)))))
+
+		downParts = append(downParts, "// remove field")
+		downParts = append(downParts, fmt.Sprintf("%s.Fields.RemoveById(%q)\n", varName, newField.GetId()))
+	}
+
+	// modified fields
+	// (note currently ignoring order-only changes as it comes with too many edge-cases)
+	for i, newField := range new.Fields {
+		var rawNewField, rawOldField []byte
+
+		rawNewField, err = marhshalWithoutEscape(newFieldsSlice[i], "\t\t", "\t")
+		if err != nil {
+			return "", "", err
+		}
+
+		var oldFieldIndex int
+
+		for j, oldField := range old.Fields {
+			if oldField.GetId() == newField.GetId() {
+				rawOldField, err = marhshalWithoutEscape(oldFieldsSlice[j], "\t\t", "\t")
+				if err != nil {
+					return "", "", err
+				}
+				oldFieldIndex = j
+				break
+			}
+		}
+
+		if rawOldField == nil || bytes.Equal(rawNewField, rawOldField) {
+			continue // new field or no change
+		}
+
+		upParts = append(upParts, "// update field")
+		upParts = append(upParts, goErrIf(fmt.Sprintf("%s.Fields.AddMarshaledJSONAt(%d, []byte(`%s`))", varName, i, escapeBacktick(string(rawNewField)))))
+
+		downParts = append(downParts, "// update field")
+		downParts = append(downParts, goErrIf(fmt.Sprintf("%s.Fields.AddMarshaledJSONAt(%d, []byte(`%s`))", varName, oldFieldIndex, escapeBacktick(string(rawOldField)))))
+	}
+
+	// ---------------------------------------------------------------
+
+	if len(upParts) == 0 && len(downParts) == 0 {
+		return "", "", ErrEmptyTemplate
+	}
+
+	return strings.TrimSpace(strings.Join(upParts, "\n\t\t")), strings.TrimSpace(strings.Join(downParts, "\n\t\t")), nil
 }
 
 func marhshalWithoutEscape(v any, prefix string, indent string) ([]byte, error) {

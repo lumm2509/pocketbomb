@@ -1,4 +1,5 @@
 import { settingsSidebar } from "../settingsSidebar";
+import { graphqlSchemaEditor } from "./graphqlSchemaEditor";
 
 export function pageGraphQLSettings(route) {
     app.store.title = "GraphQL";
@@ -36,6 +37,8 @@ export function pageGraphQLSettings(route) {
         data.formSettings = {
             graphql: JSON.parse(JSON.stringify(settings?.graphql || {})),
         };
+        // the stored schema is changed only by the schema editor apply
+        delete data.formSettings.graphql.schema;
 
         data.initSerialized = JSON.stringify(data.formSettings);
     }
@@ -195,6 +198,12 @@ export function pageGraphQLSettings(route) {
                         return t.div({ className: "block txt-center" }, t.span({ className: "loader lg" }));
                     }
                     return form();
+                },
+                () => {
+                    if (data.isLoading || !data.formSettings || !app.perms.can("collections", "write")) {
+                        return;
+                    }
+                    return [t.hr(), graphqlSchemaEditor()];
                 },
             ),
             t.footer({ className: "page-footer" }, app.components.credits()),

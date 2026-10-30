@@ -37,6 +37,8 @@ func bindGraphQLApi(app core.App, rg *router.RouterGroup[*core.RequestEvent]) {
 	sub.GET("", graphqlQuery).Bind(requireClientCredentials())
 	sub.POST("", graphqlQuery).Bind(requireClientCredentials())
 	sub.GET("/collections", graphqlCollections).Bind(RequirePermission(core.PermissionResourceCollections, core.PermissionLevelRead))
+
+	bindGraphQLSchemaApi(rg)
 }
 
 type graphqlPayload struct {

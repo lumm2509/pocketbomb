@@ -203,3 +203,73 @@ func (app *BaseApp) ImportCollections(toImport []map[string]any, deleteMissing b
 		return nil
 	})
 }
+
+// ApplyCollectionChanges saves the upsert collections and deletes the remove ones in a single transaction.
+//
+// The regular collection validations are run after all collections are saved so that the upserted
+// ones could have circular relations. The removed collections can't be referenced by the remaining ones.
+func (app *BaseApp) ApplyCollectionChanges(upsert []*Collection, remove []*Collection) error {
+	removeIds := make([]string, len(remove))
+	for i, c := range remove {
+		removeIds[i] = c.Id
+	}
+
+	return app.RunInTransaction(func(txApp App) error {
+		originals := make(map[string]*Collection, len(upsert))
+		for _, c := range upsert {
+			original, err := txApp.FindCollectionByNameOrId(c.Id)
+			if err == nil {
+				originals[c.Id] = original
+			}
+
+			c.IntegrityChecks(false)
+			if err := txApp.SaveNoValidate(c); err != nil {
+				return fmt.Errorf("failed to save collection %q: %w", c.Name, err)
+			}
+		}
+
+		for _, c := range upsert {
+			original := originals[c.Id]
+			if original == nil {
+				original = c
+			}
+
+			validator := newCollectionValidator(context.Background(), txApp, c, original)
+			if err := validator.run(); err != nil {
+				return fmt.Errorf("collection %q: %w", c.Name, err)
+			}
+		}
+
+		for _, c := range remove {
+			references, err := txApp.FindCollectionReferences(c, removeIds...)
+			if err != nil {
+				return err
+			}
+			if len(references) > 0 {
+				names := make([]string, 0, len(references))
+				for ref := range references {
+					names = append(names, ref.Name)
+				}
+				slices.Sort(names)
+				return fmt.Errorf("collection %q is still referenced by %v", c.Name, names)
+			}
+		}
+
+		for _, c := range remove {
+			// note: the references between the removed collections are checked above
+			fresh, err := txApp.FindCollectionByNameOrId(c.Id)
+			if err != nil {
+				return err
+			}
+
+			if err := txApp.Delete(fresh); err != nil {
+				fresh.IntegrityChecks(false)
+				if retryErr := txApp.Delete(fresh); retryErr != nil {
+					return errors.Join(err, retryErr)
+				}
+			}
+		}
+
+		return nil
+	})
+}
