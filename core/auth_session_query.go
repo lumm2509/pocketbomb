@@ -402,6 +402,11 @@ type authSessionTokenRow struct {
 	RootStatus            string                  `db:"rootStatus"`
 	RootExpiresAt         types.DateTime          `db:"rootExpiresAt"`
 
+	// the launching dashboard session of an online session
+	LaunchSession          string         `db:"launchSession"`
+	LaunchSessionStatus    string         `db:"launchSessionStatus"`
+	LaunchSessionExpiresAt types.DateTime `db:"launchSessionExpiresAt"`
+
 	// impersonation
 	Impersonator                 string         `db:"impersonator"`
 	ImpersonatorKeyHash          string         `db:"impersonatorKeyHash"`
@@ -453,6 +458,9 @@ func (app *BaseApp) checkAuthSessionTokenClaims(record *Record, sid string, clie
 		"(r.id IS NOT NULL) as rootExists",
 		"COALESCE(r.status, '') as rootStatus",
 		"COALESCE(r.expiresAt, '') as rootExpiresAt",
+		"s.launchSession as launchSession",
+		"COALESCE(ls.status, '') as launchSessionStatus",
+		"COALESCE(ls.expiresAt, '') as launchSessionExpiresAt",
 		"s.impersonator as impersonator",
 		"s.impersonatorKeyHash as impersonatorKeyHash",
 		"COALESCE(su.tokenKey, '') as impersonatorTokenKey",
@@ -476,6 +484,7 @@ func (app *BaseApp) checkAuthSessionTokenClaims(record *Record, sid string, clie
 		InnerJoin(CollectionNameOAuth2Clients+" c", dbx.NewExp("[[c.id]] = [[s.client]]")).
 		LeftJoin(CollectionNameApplicationInstallations+" ai", dbx.NewExp("[[c.applicationInstallationRef]] != '' AND [[ai.id]] = [[c.applicationInstallationRef]]")).
 		LeftJoin(CollectionNameAuthSessions+" r", dbx.NewExp("[[s.parent]] != '' AND [[r.id]] = [[s.parent]]")).
+		LeftJoin(CollectionNameAuthSessions+" ls", dbx.NewExp("[[s.launchSession]] != '' AND [[ls.id]] = [[s.launchSession]]")).
 		LeftJoin(CollectionNameAuthSessions+" i", dbx.NewExp("[[s.impersonatorSession]] != '' AND [[i.id]] = [[s.impersonatorSession]]")).
 		LeftJoin(CollectionNameSuperusers+" su", dbx.NewExp("[[s.impersonator]] != '' AND [[su.id]] = [[s.impersonator]]")).
 		Where(dbx.HashExp{"s.id": sid}).
@@ -556,6 +565,11 @@ func (app *BaseApp) checkAuthSessionTokenClaims(record *Record, sid string, clie
 			!row.RootExpiresAt.Time().After(time.Now()) {
 			return errors.New("the auth token root session has ended")
 		}
+	}
+
+	if row.LaunchSession != "" &&
+		(row.LaunchSessionStatus != AuthSessionStatusActive || !row.LaunchSessionExpiresAt.Time().After(time.Now())) {
+		return errors.New("the auth token launching session has ended")
 	}
 
 	if row.Impersonator != "" {

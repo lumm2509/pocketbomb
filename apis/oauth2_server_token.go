@@ -27,6 +27,10 @@ const (
 	// extensions launch tokens (exchanged by the installation managed client for
 	// a staff online access token, see [oauth2TokenExchangeLaunch]).
 	oauth2TokenTypeLaunchToken = "urn:pocketbase:params:oauth:token-type:launch_token"
+
+	// oauth2TokenTypeSessionToken is a custom subject token type of the embedded
+	// applications session tokens (the same exchange with the same checks as the launch tokens).
+	oauth2TokenTypeSessionToken = "urn:pocketbase:params:oauth:token-type:session_token"
 )
 
 type oauth2TokenForm struct {
@@ -381,7 +385,7 @@ func oauth2TokenExchange(e *core.RequestEvent, collection *core.Collection, clie
 		return newOAuth2Error(http.StatusBadRequest, oauth2ErrInvalidRequest, "Missing subject_token or subject_token_type parameter.")
 	}
 
-	if form.SubjectTokenType == oauth2TokenTypeLaunchToken {
+	if form.SubjectTokenType == oauth2TokenTypeLaunchToken || form.SubjectTokenType == oauth2TokenTypeSessionToken {
 		return oauth2TokenExchangeLaunch(e, collection, client, form)
 	}
 
@@ -524,7 +528,12 @@ func oauth2TokenExchangeLaunch(e *core.RequestEvent, collection *core.Collection
 
 	invalidLaunchErr := oauth2InvalidGrantError("Invalid, expired or already used launch token.")
 
-	claims, err := core.ParseApplicationLaunchToken(e.App, form.SubjectToken)
+	parse := core.ParseApplicationLaunchToken
+	if form.SubjectTokenType == oauth2TokenTypeSessionToken {
+		parse = core.ParseApplicationSessionToken
+	}
+
+	claims, err := parse(e.App, form.SubjectToken)
 	if err != nil {
 		return invalidLaunchErr
 	}
@@ -600,6 +609,7 @@ func oauth2TokenExchangeLaunch(e *core.RequestEvent, collection *core.Collection
 	session.SetRecordRef(staff.Id)
 	session.SetParent(root.Id)
 	session.SetLaunchJti(claims.Jti)
+	session.SetLaunchSession(staffSession.Id)
 	session.SetScopesRequested(scopes)
 	session.SetScopes(scopes)
 	session.SetAuthMethods([]core.AuthSessionMethod{{Method: core.AuthSessionMethodLaunch, Time: now}})

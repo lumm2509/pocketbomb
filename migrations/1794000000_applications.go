@@ -15,6 +15,7 @@ import (
 //     (the existing clients keep their behavior: authorization_code, refresh_token and token_exchange)
 //   - adds _webhooks.applicationInstallationRef (the installation managed webhooks)
 //   - adds _authSessions.launchJti (the single use extension launch tokens)
+//     and launchSession (the dashboard session that an online session ends with)
 func init() {
 	core.SystemMigrations.Register(func(txApp core.App) error {
 		applications, err := createApplicationsCollection(txApp)
@@ -70,7 +71,9 @@ func init() {
 			return err
 		}
 		sessions.Fields.Add(&core.TextField{Name: "launchJti", System: true, Hidden: true})
+		sessions.Fields.Add(&core.TextField{Name: "launchSession", System: true, Hidden: true})
 		sessions.AddIndex("idx_authSessions_launchJti", true, "launchJti", "launchJti != ''")
+		sessions.AddIndex("idx_authSessions_launchSession", false, "launchSession", "launchSession != ''")
 		if err := txApp.Save(sessions); err != nil {
 			return fmt.Errorf("_authSessions error: %w", err)
 		}
@@ -85,7 +88,9 @@ func init() {
 			return err
 		}
 		sessions.RemoveIndex("idx_authSessions_launchJti")
+		sessions.RemoveIndex("idx_authSessions_launchSession")
 		sessions.Fields.RemoveByName("launchJti")
+		sessions.Fields.RemoveByName("launchSession")
 		// note: without validation because the system fields can't be removed otherwise
 		if err := txApp.SaveNoValidate(sessions); err != nil {
 			return err

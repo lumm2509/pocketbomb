@@ -773,6 +773,17 @@ func (m *AuthSession) HasRefreshExpired() bool {
 // Application extension launch
 // -------------------------------------------------------------------
 
+// LaunchSession returns the "launchSession" record field value (the staff
+// dashboard session that launched the application; the online session ends with it).
+func (m *AuthSession) LaunchSession() string {
+	return m.GetString("launchSession")
+}
+
+// SetLaunchSession updates the "launchSession" record field value.
+func (m *AuthSession) SetLaunchSession(sessionId string) {
+	m.Set("launchSession", sessionId)
+}
+
 // LaunchJti returns the "launchJti" record field value (the jti of the exchanged
 // extension launch token of an online session; unique, aka. single use).
 func (m *AuthSession) LaunchJti() string {
@@ -1051,7 +1062,11 @@ func (app *BaseApp) registerAuthSessionHooks() {
 				return err
 			}
 
-			return endAuthSessionsByExpr(e.Context, e.App, dbx.HashExp{"impersonatorSession": e.Record.Id})
+			if err := endAuthSessionsByExpr(e.Context, e.App, dbx.HashExp{"impersonatorSession": e.Record.Id}); err != nil {
+				return err
+			}
+
+			return endAuthSessionsByExpr(e.Context, e.App, dbx.HashExp{"launchSession": e.Record.Id})
 		},
 		Priority: 99,
 	})
@@ -1207,7 +1222,7 @@ func validateAuthSession(app App, record *Record) error {
 			)
 		}
 
-		for _, field := range []string{"parent", "handleHash", "codeHash", "refreshTokenHash", "prevRefreshTokenHash", "impersonatorSession"} {
+		for _, field := range []string{"parent", "handleHash", "codeHash", "refreshTokenHash", "prevRefreshTokenHash", "impersonatorSession", "launchSession"} {
 			if record.GetString(field) != "" {
 				errs[field] = validation.NewError(
 					"validation_auth_session_root_field",
@@ -1235,6 +1250,7 @@ func validateAuthSession(app App, record *Record) error {
 			!isManagedClient ||
 			!isSuperusersCollectionId(app, collectionId) ||
 			record.GetString("launchJti") == "" ||
+			record.GetString("launchSession") == "" ||
 			record.GetString("parent") == "" ||
 			record.GetString("ssoSecretHash") != "" ||
 			record.GetString("impersonator") != "" ||
