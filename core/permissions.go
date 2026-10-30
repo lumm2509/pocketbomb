@@ -57,6 +57,7 @@ const (
 	PermissionResourceSessions      = "sessions"
 	PermissionResourceImpersonate   = "impersonate"
 	PermissionResourceApplications  = "applications"
+	PermissionResourceAppProxy      = "app_proxy"
 
 	// PermissionResourceSQL is available only for the Owners
 	// (raw SQL bypasses everything and it is not assignable).
@@ -135,7 +136,7 @@ var readWrite = []string{PermissionLevelRead, PermissionLevelWrite}
 //   - sql (raw SQL bypasses everything)
 //
 // Only the resources marked as ApplicationGrantable could be granted to the application
-// installations (settings read, collections read, logs, crons, webhooks and llm);
+// installations (settings read, collections read, logs, crons, webhooks, llm and app_proxy);
 // the staff, roles, sessions, impersonate, oauth2_clients and applications resources
 // (and the Owner only levels) are never grantable to an application.
 var PermissionResources = []PermissionResource{
@@ -155,6 +156,7 @@ var PermissionResources = []PermissionResource{
 	newPermissionResource(PermissionResourceSessions, "Sessions, consents and auth records data", readWrite, nil, ""),
 	newPermissionResource(PermissionResourceImpersonate, "Impersonate", []string{PermissionLevelWrite}, nil, ""),
 	newPermissionResource(PermissionResourceApplications, "Applications (install, grants and credentials)", readWrite, nil, ""),
+	applicationGrantable(newPermissionResource(PermissionResourceAppProxy, "App proxy (receive public storefront requests)", []string{PermissionLevelWrite}, nil, "")),
 	newPermissionResource(PermissionResourceSQL, "SQL console", []string{PermissionLevelWrite}, []string{PermissionLevelWrite},
 		"Owner only (raw SQL bypasses everything)"),
 }

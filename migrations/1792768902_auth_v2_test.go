@@ -12,7 +12,7 @@ import (
 
 // forkMigrationsTotal is the number of the system migrations applied after
 // the last upstream one (auth v2, llm logs, webhooks, webhook deliveries, rbac, applications and api keys).
-const forkMigrationsTotal = 7
+const forkMigrationsTotal = 8
 
 // forkCollections are the system collections created by the fork migrations.
 var forkCollections = []string{

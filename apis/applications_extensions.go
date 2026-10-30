@@ -2,6 +2,7 @@ package apis
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/lumm2509/pocketbomb/core"
@@ -91,7 +92,7 @@ type applicationExtensionLaunchResponse struct {
 	URL string `json:"url"`
 
 	// LaunchToken is the short-lived single use launch token that must be POSTed
-	// to the extension URL ("launch_token" form field; never in a URL).
+	// to the extension URL in the dashboard iframe ("launch_token" form field; never in a URL).
 	LaunchToken string `json:"launchToken"`
 }
 
@@ -101,73 +102,14 @@ type applicationExtensionLaunchResponse struct {
 // applications read permission and only with the first-party dashboard access token of their
 // own, aka. non-impersonated, dashboard session; see [core.CheckApplicationExtensionAccess]).
 func applicationExtensionLaunch(e *core.RequestEvent) error {
-	staffSessionId, err := applicationLaunchDashboardSession(e)
+	claims, manifest, ext, err := applicationExtensionTokenClaims(e)
 	if err != nil {
-		return e.ForbiddenError("The extensions could be launched only by the staff members from the dashboard.", err)
-	}
-
-	installation, err := e.App.FindApplicationInstallationById(e.Request.PathValue("id"))
-	if err != nil {
-		return e.NotFoundError("Missing or invalid application installation.", err)
-	}
-
-	form := &applicationExtensionLaunchForm{}
-	if err := e.BindBody(form); err != nil {
-		return e.BadRequestError("An error occurred while loading the submitted data.", err)
-	}
-
-	version, err := e.App.FindApplicationVersionById(installation.VersionRef())
-	if err != nil {
-		return e.NotFoundError("Missing or invalid application version.", err)
-	}
-
-	manifest, err := version.Manifest()
-	if err != nil {
-		return e.InternalServerError("Failed to load the application manifest.", err)
-	}
-
-	ext, ok := manifest.FindExtension(form.Extension)
-	if !ok {
-		return e.NotFoundError("Missing or invalid application extension.", nil)
-	}
-
-	var record *core.Record
-	if ext.Type == core.ApplicationExtensionTypeRecordAction {
-		if form.RecordId == "" {
-			return e.BadRequestError("The record actions require a recordId.", nil)
-		}
-
-		record, err = e.App.FindRecordById(ext.Collection, form.RecordId)
-		if err != nil {
-			return e.NotFoundError("Missing or invalid record.", err)
-		}
-	} else if form.RecordId != "" {
-		return e.BadRequestError("The navigation extensions don't have a record.", nil)
-	}
-
-	if _, err := core.CheckApplicationExtensionAccess(e.App, e.ActorInfo(), installation, ext, record); err != nil {
-		return e.ForbiddenError("You are not allowed to launch this application extension.", err)
-	}
-
-	client, err := e.App.FindApplicationInstallationClient(installation.Id)
-	if err != nil || client.Disabled() {
-		return e.BadRequestError("The application installation client is missing or disabled.", err)
+		return err
 	}
 
 	extensionURL, err := manifest.ExtensionURL(ext)
 	if err != nil {
 		return e.BadRequestError("Invalid application extension URL.", err)
-	}
-
-	claims := core.ApplicationLaunchClaims{
-		ClientId:       client.ClientId(),
-		StaffId:        e.Auth.Id,
-		StaffSessionId: staffSessionId,
-		InstallationId: installation.Id,
-		Extension:      ext.Handle,
-	}
-	if record != nil {
-		claims.Record = &core.ApplicationLaunchRecord{Collection: record.Collection().Name, Id: record.Id}
 	}
 
 	token, err := core.NewApplicationLaunchToken(e.App, claims)
@@ -178,6 +120,134 @@ func applicationExtensionLaunch(e *core.RequestEvent) error {
 	setOAuth2NoStoreHeaders(e)
 
 	return e.JSON(http.StatusOK, applicationExtensionLaunchResponse{URL: extensionURL, LaunchToken: token})
+}
+
+type applicationExtensionSessionTokenResponse struct {
+	// SessionToken is the short-lived session token of the embedded application
+	// (reusable until it expires and never accepted as an auth token).
+	SessionToken string `json:"sessionToken"`
+	ExpiresIn    int    `json:"expiresIn"`
+}
+
+// POST /api/applications/installations/{id}/session-token
+//
+// Issues a session token of the embedded extension with the same checks as the launch.
+func applicationExtensionSessionToken(e *core.RequestEvent) error {
+	claims, _, _, err := applicationExtensionTokenClaims(e)
+	if err != nil {
+		return err
+	}
+
+	token, err := core.NewApplicationSessionToken(e.App, claims)
+	if err != nil {
+		return e.InternalServerError("Failed to generate the session token.", err)
+	}
+
+	setOAuth2NoStoreHeaders(e)
+
+	return e.JSON(http.StatusOK, applicationExtensionSessionTokenResponse{
+		SessionToken: token,
+		ExpiresIn:    int(core.ApplicationSessionTokenDuration.Seconds()),
+	})
+}
+
+// applicationExtensionTokenClaims runs the launch checks of the request
+// and returns the claims of the extension launch and session tokens.
+func applicationExtensionTokenClaims(e *core.RequestEvent) (core.ApplicationLaunchClaims, *core.ApplicationManifest, core.ApplicationManifestExtension, error) {
+	claims := core.ApplicationLaunchClaims{}
+	ext := core.ApplicationManifestExtension{}
+
+	staffSessionId, err := applicationLaunchDashboardSession(e)
+	if err != nil {
+		return claims, nil, ext, e.ForbiddenError("The extensions could be launched only by the staff members from the dashboard.", err)
+	}
+
+	installation, err := e.App.FindApplicationInstallationById(e.Request.PathValue("id"))
+	if err != nil {
+		return claims, nil, ext, e.NotFoundError("Missing or invalid application installation.", err)
+	}
+
+	form := &applicationExtensionLaunchForm{}
+	if err := e.BindBody(form); err != nil {
+		return claims, nil, ext, e.BadRequestError("An error occurred while loading the submitted data.", err)
+	}
+
+	version, err := e.App.FindApplicationVersionById(installation.VersionRef())
+	if err != nil {
+		return claims, nil, ext, e.NotFoundError("Missing or invalid application version.", err)
+	}
+
+	manifest, err := version.Manifest()
+	if err != nil {
+		return claims, nil, ext, e.InternalServerError("Failed to load the application manifest.", err)
+	}
+
+	// the iframe has allow-same-origin: an application on the dashboard origin would escape the sandbox
+	if isDashboardOrigin(e, manifest.ApplicationURL) {
+		return claims, nil, ext, e.BadRequestError("The application can't be embedded because it has the same origin as the dashboard.", nil)
+	}
+
+	// the application documents allow only the issuer origin in their frame-ancestors
+	issuerOrigin := core.ApplicationOrigin(e.App.Settings().Meta.AppURL)
+	if requestOrigin := core.ApplicationOrigin(e.RequestOrigin()); requestOrigin != issuerOrigin {
+		return claims, nil, ext, e.BadRequestError(fmt.Sprintf(
+			"The application can't be embedded because the dashboard origin differs from the Application URL (%q): set Application URL to %s in Settings.",
+			issuerOrigin, requestOrigin,
+		), nil)
+	}
+
+	ext, ok := manifest.FindExtension(form.Extension)
+	if !ok {
+		return claims, nil, ext, e.NotFoundError("Missing or invalid application extension.", nil)
+	}
+
+	var record *core.Record
+	if ext.Type == core.ApplicationExtensionTypeRecordAction {
+		if form.RecordId == "" {
+			return claims, nil, ext, e.BadRequestError("The record actions require a recordId.", nil)
+		}
+
+		record, err = e.App.FindRecordById(ext.Collection, form.RecordId)
+		if err != nil {
+			return claims, nil, ext, e.NotFoundError("Missing or invalid record.", err)
+		}
+	} else if form.RecordId != "" {
+		return claims, nil, ext, e.BadRequestError("The navigation extensions don't have a record.", nil)
+	}
+
+	if _, err := core.CheckApplicationExtensionAccess(e.App, e.ActorInfo(), installation, ext, record); err != nil {
+		return claims, nil, ext, e.ForbiddenError("You are not allowed to launch this application extension.", err)
+	}
+
+	client, err := e.App.FindApplicationInstallationClient(installation.Id)
+	if err != nil || client.Disabled() {
+		return claims, nil, ext, e.BadRequestError("The application installation client is missing or disabled.", err)
+	}
+
+	claims = core.ApplicationLaunchClaims{
+		ClientId:       client.ClientId(),
+		StaffId:        e.Auth.Id,
+		StaffSessionId: staffSessionId,
+		InstallationId: installation.Id,
+		Extension:      ext.Handle,
+	}
+	if record != nil {
+		claims.Record = &core.ApplicationLaunchRecord{Collection: record.Collection().Name, Id: record.Id}
+	}
+
+	return claims, manifest, ext, nil
+}
+
+// isDashboardOrigin reports whether the provided url has the
+// origin of the current request or the configured application URL.
+func isDashboardOrigin(e *core.RequestEvent, rawURL string) bool {
+	origin := core.ApplicationOrigin(rawURL)
+	if origin == "" {
+		return false
+	}
+
+	return origin == core.ApplicationOrigin(e.RequestScheme()+"://"+e.Request.Host) ||
+		origin == core.ApplicationOrigin(e.App.Settings().Meta.AppURL)
 }
 
 // applicationLaunchDashboardSession returns the staff dashboard session id ("sid") of the request

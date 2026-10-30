@@ -325,6 +325,25 @@ func (m *ApplicationInstallation) WebhookSecret() string {
 	return m.GetString("webhookSecret")
 }
 
+// ProxyPrefix returns the "proxyPrefix" record field value (the effective app proxy path prefix).
+func (m *ApplicationInstallation) ProxyPrefix() string {
+	return m.GetString("proxyPrefix")
+}
+
+// ProxySubpath returns the "proxySubpath" record field value (the effective app proxy path subpath).
+func (m *ApplicationInstallation) ProxySubpath() string {
+	return m.GetString("proxySubpath")
+}
+
+// ProxyPathPrefix returns the public "/{prefix}/{subpath}" proxy path (empty if the installation has none).
+func (m *ApplicationInstallation) ProxyPathPrefix() string {
+	if m.ProxySubpath() == "" {
+		return ""
+	}
+
+	return "/" + m.ProxyPrefix() + "/" + m.ProxySubpath()
+}
+
 // -------------------------------------------------------------------
 // Model level invariants
 // -------------------------------------------------------------------
@@ -492,6 +511,10 @@ func (app *BaseApp) registerApplicationHooks() {
 						).SetParams(map[string]any{"scopes": strings.Join(exceeding, ", ")})
 					}
 				}
+			}
+
+			if err := checkApplicationInstallationProxyPath(e.App, e.Record); err != nil {
+				errs["proxySubpath"] = err
 			}
 
 			if !e.Record.IsNew() &&
@@ -668,6 +691,15 @@ func (app *BaseApp) registerApplicationHooks() {
 		},
 		Priority: -99,
 	})
+
+	// the dashboard frame-src origins
+	resetFrameOrigins := func(e *RecordEvent) error {
+		app.applicationCatalogs.resetFrameOrigins()
+		return e.Next()
+	}
+	app.OnRecordAfterCreateSuccess(CollectionNameApplicationInstallations).BindFunc(resetFrameOrigins)
+	app.OnRecordAfterUpdateSuccess(CollectionNameApplicationInstallations).BindFunc(resetFrameOrigins)
+	app.OnRecordAfterDeleteSuccess(CollectionNameApplicationInstallations).BindFunc(resetFrameOrigins)
 
 	// uninstall notification and lifecycle webhook (any delete path; sent after the commit)
 	app.OnRecordDelete(CollectionNameApplicationInstallations).Bind(&hook.Handler[*RecordEvent]{

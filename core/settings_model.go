@@ -201,6 +201,11 @@ func newDefaultSettings() *Settings {
 					{Label: "/api/", MaxRequests: 300, Duration: 10},
 					// the OAuth2 server (hosted pages, token, revoke, introspect, userinfo, logout) routes
 					{Label: "/oauth2/", MaxRequests: 300, Duration: 10},
+					// the public app proxy routes
+					{Label: "/a/", MaxRequests: 300, Duration: 10},
+					{Label: "/apps/", MaxRequests: 300, Duration: 10},
+					{Label: "/community/", MaxRequests: 300, Duration: 10},
+					{Label: "/tools/", MaxRequests: 300, Duration: 10},
 				},
 			},
 		},

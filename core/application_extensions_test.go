@@ -437,6 +437,7 @@ func TestApplicationLaunchSessionInvariants(t *testing.T) {
 		session.SetRecordRef(staff.Id)
 		session.SetParent(parent)
 		session.SetLaunchJti(jti)
+		session.SetLaunchSession(dashboardSession.Id)
 		session.SetScopes([]string{"read_demo2"})
 		session.SetAuthMethods([]core.AuthSessionMethod{{Method: core.AuthSessionMethodLaunch, Time: now}})
 		session.SetAuthTime(now)
@@ -446,6 +447,10 @@ func TestApplicationLaunchSessionInvariants(t *testing.T) {
 	}
 
 	t.Run("invalid launch sessions", func(t *testing.T) {
+		withoutLaunchSession := newLaunchSession("jti0", dashboardSession.Parent(), installed.Client.Id)
+		withoutLaunchSession.SetLaunchSession("")
+		tests.TestValidationErrors(t, app.Save(withoutLaunchSession), []string{"amr"})
+
 		tests.TestValidationErrors(t, app.Save(newLaunchSession("", dashboardSession.Parent(), installed.Client.Id)), []string{"amr"})
 		tests.TestValidationErrors(t, app.Save(newLaunchSession("jti1", "", installed.Client.Id)), []string{"amr"})
 

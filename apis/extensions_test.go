@@ -2,6 +2,8 @@ package apis_test
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -173,5 +175,40 @@ func createTestExtensions() []core.UIExtension {
 				},
 			},
 		},
+	}
+}
+
+func TestUIExtensionDocumentCSP(t *testing.T) {
+	// note: not parallel to avoid conflicts with the ui.DistDirFS nil test
+
+	app, err := tests.NewTestApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Cleanup()
+
+	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		e.UIExtensions = []core.UIExtension{{Name: "ext1", FS: fstest.MapFS{
+			"page.html": {Data: []byte("<script src='./own.js'></script>")},
+			"own.js":    {Data: []byte("1")},
+		}}}
+		return e.Next()
+	})
+
+	router, err := appRouterWithServe(t, app)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for path, scriptSrc := range map[string]string{
+		"/_/extensions/ext1/page.html": "script-src 'self';",
+		"/_/extensions/ext1/own.js":    "script-src 'none';",
+		"/_/extensions.js":             "script-src 'none';",
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if csp := rec.Header().Get("Content-Security-Policy"); rec.Code != http.StatusOK || !strings.Contains(csp, scriptSrc) {
+			t.Fatalf("[%s] Unexpected response %d %q", path, rec.Code, csp)
+		}
 	}
 }

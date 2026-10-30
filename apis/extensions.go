@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
+	"strings"
 
 	"github.com/lumm2509/pocketbomb/core"
 	"github.com/lumm2509/pocketbomb/tools/hook"
@@ -31,7 +33,11 @@ func bindUIExtensions(app core.App) {
 					}
 
 					if e.Response.Header().Get("Content-Security-Policy") == "" {
-						e.Response.Header().Set("Content-Security-Policy", defaultCSP)
+						if isUIExtensionDocument(e.Request.URL.Path) {
+							e.Response.Header().Set("Content-Security-Policy", dashboardCSPWithScriptSrc(e.App, "script-src 'self'"))
+						} else {
+							e.Response.Header().Set("Content-Security-Policy", dashboardCSP(e.App, ""))
+						}
 					}
 
 					return e.Next()
@@ -67,6 +73,19 @@ func bindUIExtensions(app core.App) {
 			return se.Next()
 		},
 	})
+}
+
+// isUIExtensionDocument reports whether the provided path is an HTML document of an UI extension
+// (installed by the Owner; its own scripts run like in upstream, only in these documents).
+func isUIExtensionDocument(urlPath string) bool {
+	rest, ok := strings.CutPrefix(urlPath, "/_/extensions/")
+	if !ok {
+		return false
+	}
+
+	ext := strings.ToLower(path.Ext(rest))
+
+	return ext == "" || ext == ".html" || ext == ".htm"
 }
 
 func copyExtensionMainjs(buf *bytes.Buffer, ext core.UIExtension) error {

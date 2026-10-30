@@ -1,6 +1,6 @@
 import { createDashboardClient, handleCallback, impersonate, login } from "@/auth/dashboardOAuth2";
 import "@/auth/permissions";
-import { isTokenExpired } from "pocketbase";
+import { isTokenExpired } from "@pocketbomb/primer";
 
 const LOGIN_PATH = "#/login";
 
@@ -51,6 +51,11 @@ window.app.auth.ready = (async () => {
 
     // load the RBAC permissions before the routes initialization
     await app.perms.load();
+
+    // the sidebar and record panel extensions are also needed after a page reload (no auth change)
+    if (app.pb.authStore.record?.id) {
+        app.store.loadApplicationExtensions();
+    }
 })().catch((err) => {
     console.warn("Failed to initialize the dashboard auth:", err);
 });

@@ -71,6 +71,14 @@ function applicationPanel(application, resources, settings) {
         get versionLabel() {
             return data.installation?.version || data.application.latestVersion?.version || "";
         },
+        // the app proxy of the installed (or latest) version manifest
+        get proxyManifest() {
+            const versionId = data.installation?.versionRef || data.application.latestVersion?.id;
+            const version = (data.application.versions || []).find((v) => v.id == versionId);
+            return version?.manifest?.app_proxy || null;
+        },
+        proxyPrefix: application.installation?.proxyPrefix || "",
+        proxySubpath: application.installation?.proxySubpath || "",
         // the catalog entry of a catalog application (cleared after an update)
         catalogEntry: settings.catalogEntry || null,
         get updateAvailable() {
@@ -91,6 +99,8 @@ function applicationPanel(application, resources, settings) {
             if (fresh) {
                 data.application = fresh;
                 data.grant = normalizePermissions(fresh.installation?.permissions);
+                data.proxyPrefix = fresh.installation?.proxyPrefix || "";
+                data.proxySubpath = fresh.installation?.proxySubpath || "";
             }
         } catch (err) {
             if (!err?.isAbort) {
@@ -139,6 +149,20 @@ function applicationPanel(application, resources, settings) {
             }
 
             openApplicationSecretModal(result, data.application);
+        });
+    }
+
+    function saveProxyPath() {
+        run(async () => {
+            await app.pb.send(`/api/applications/installations/${encodeURIComponent(data.installation.id)}`, {
+                method: "PATCH",
+                body: { proxyPrefix: data.proxyPrefix, proxySubpath: data.proxySubpath },
+            });
+
+            app.store.errors = null;
+            app.toasts.success("Successfully updated the app proxy path.");
+
+            await reload();
         });
     }
 
@@ -409,6 +433,7 @@ function applicationPanel(application, resources, settings) {
                     ),
                 )
                 : null,
+            appProxy(),
             managedWebhooks(),
             t.h6({ className: "m-t-base m-b-xs" }, "Versions"),
             t.div(
@@ -445,6 +470,79 @@ function applicationPanel(application, resources, settings) {
                 }),
             ),
         );
+    }
+
+    // the public path of the app proxy (customizable per installation)
+    function appProxy() {
+        if (!data.proxyManifest) {
+            return null;
+        }
+
+        const canEdit = data.isInstalled && !!data.installation.proxySubpath && data.canWrite
+            && data.coversCurrentGrant;
+
+        return [
+            t.h6({ className: "m-t-base m-b-xs" }, "App proxy"),
+            t.div(
+                { className: "txt-hint txt-sm m-b-xs application-proxy-info" },
+                "The public requests of this path are forwarded (signed) to ",
+                t.code(null, data.proxyManifest.url),
+                ". They are sandboxed and never carry the visitor cookies or tokens.",
+            ),
+            data.isInstalled && !data.installation.proxySubpath
+                ? t.div(
+                    { className: "txt-hint txt-sm" },
+                    "Not active (grant the App proxy permission to activate ",
+                    t.code(null, `/${data.proxyManifest.prefix}/${data.proxyManifest.subpath}`),
+                    ").",
+                )
+                : t.div(
+                    { className: "flex gap-10 application-proxy-form" },
+                    t.div(
+                        { className: "field" },
+                        t.label({ htmlFor: "application_proxy_prefix" }, "Prefix"),
+                        t.select(
+                            {
+                                id: "application_proxy_prefix",
+                                name: "proxyPrefix",
+                                disabled: () => !canEdit || data.isBusy,
+                                value: () => data.proxyPrefix || data.proxyManifest.prefix,
+                                onchange: (e) => (data.proxyPrefix = e.target.value),
+                            },
+                            ["a", "apps", "community", "tools"].map((p) => t.option({ value: p }, "/" + p)),
+                        ),
+                    ),
+                    t.div(
+                        { className: "field" },
+                        t.label({ htmlFor: "application_proxy_subpath" }, "Subpath"),
+                        t.input({
+                            id: "application_proxy_subpath",
+                            type: "text",
+                            name: "proxySubpath",
+                            disabled: () => !canEdit || data.isBusy,
+                            value: () => data.proxySubpath || data.proxyManifest.subpath,
+                            oninput: (e) => (data.proxySubpath = e.target.value),
+                        }),
+                    ),
+                    canEdit
+                        ? t.button(
+                            {
+                                type: "button",
+                                className: () =>
+                                    `btn sm secondary m-t-auto application-proxy-save-btn ${
+                                        data.isBusy ? "loading" : ""
+                                    }`,
+                                disabled: () =>
+                                    data.isBusy
+                                    || (data.proxyPrefix == data.installation.proxyPrefix
+                                        && data.proxySubpath == data.installation.proxySubpath),
+                                onclick: saveProxyPath,
+                            },
+                            t.span({ className: "txt" }, "Save path"),
+                        )
+                        : null,
+                ),
+        ];
     }
 
     // the installation managed webhooks (read-only; synced with the installed manifest version)

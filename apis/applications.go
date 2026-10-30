@@ -27,7 +27,8 @@ import (
 // [core.CheckApplicationInstallationChange]) apply only to the API requests.
 //
 // The manifest extensions are listed for and launched by the staff from the dashboard
-// (launch token POSTed to the extension URL, see [core.ApplicationLaunchClaims]).
+// (launch token POSTed to the extension URL in the dashboard iframe, see [core.ApplicationLaunchClaims];
+// then session tokens for the embedded application requests).
 func bindApplicationsApi(app core.App, rg *router.RouterGroup[*core.RequestEvent]) {
 	read := RequirePermission(core.PermissionResourceApplications, core.PermissionLevelRead)
 	write := RequirePermission(core.PermissionResourceApplications, core.PermissionLevelWrite)
@@ -47,6 +48,7 @@ func bindApplicationsApi(app core.App, rg *router.RouterGroup[*core.RequestEvent
 	sub.POST("/installations/{id}/rotate-secret", applicationInstallationRotateSecret).Bind(write)
 	sub.DELETE("/installations/{id}", applicationUninstall).Bind(write)
 	sub.POST("/installations/{id}/launch", applicationExtensionLaunch).Bind(read)
+	sub.POST("/installations/{id}/session-token", applicationExtensionSessionToken).Bind(read)
 }
 
 // -------------------------------------------------------------------
@@ -86,6 +88,8 @@ type applicationInstallationResponse struct {
 	InstalledBy     string                        `json:"installedBy"`
 	SecretRotatedAt string                        `json:"secretRotatedAt"`
 	Webhooks        []*applicationWebhookResponse `json:"webhooks"`
+	ProxyPrefix     string                        `json:"proxyPrefix"`
+	ProxySubpath    string                        `json:"proxySubpath"`
 	Created         string                        `json:"created"`
 	Updated         string                        `json:"updated"`
 }
@@ -134,6 +138,8 @@ func newApplicationInstallationResponse(e *core.RequestEvent, installation *core
 		TokenURL:        core.OAuth2Issuer(e.App, installation.Collection()) + "/token",
 		InstalledBy:     installation.InstalledBy(),
 		SecretRotatedAt: installation.SecretRotatedAt().String(),
+		ProxyPrefix:     installation.ProxyPrefix(),
+		ProxySubpath:    installation.ProxySubpath(),
 		Created:         installation.GetDateTime("created").String(),
 		Updated:         installation.GetDateTime("updated").String(),
 	}
@@ -539,6 +545,9 @@ func installApplication(e *core.RequestEvent, application *core.Application, per
 type applicationInstallationUpdateForm struct {
 	Permissions *core.Permissions `json:"permissions"`
 	VersionRef  *string           `json:"versionRef"`
+
+	ProxyPrefix  *string `json:"proxyPrefix"`
+	ProxySubpath *string `json:"proxySubpath"`
 }
 
 // PATCH /api/applications/installations/{id}
@@ -549,6 +558,9 @@ type applicationInstallationUpdateForm struct {
 // If the new version requests scopes beyond the previous version and the current grant,
 // the new grant must be submitted (the grant never grows automatically).
 // The managed webhooks are re-synced.
+//
+// The app proxy path could be customized only on its own (a version or
+// grant change has side effects that can't be rolled back with it).
 func applicationInstallationUpdate(e *core.RequestEvent) error {
 	installation, err := e.App.FindApplicationInstallationById(e.Request.PathValue("id"))
 	if err != nil {
@@ -558,6 +570,10 @@ func applicationInstallationUpdate(e *core.RequestEvent) error {
 	form := &applicationInstallationUpdateForm{}
 	if err := e.BindBody(form); err != nil {
 		return e.BadRequestError("An error occurred while loading the submitted data.", err)
+	}
+
+	if form.ProxyPrefix != nil || form.ProxySubpath != nil {
+		return applicationInstallationProxyUpdate(e, installation, form)
 	}
 
 	versionRef := ""

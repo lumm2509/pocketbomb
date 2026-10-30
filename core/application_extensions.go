@@ -25,14 +25,24 @@ import (
 //     of the installation (effective = staff permissions ∩ installation grant, see [Authorize]);
 //     the online session is a child of the staff root SSO session (the staff logout ends it)
 //
+// Embedded in the dashboard iframe, the application also requests session tokens (see [ApplicationSessionTokenType])
+// from the dashboard, renewed every minute: the only other token that the token exchange accepts.
+//
 // The launch token is never accepted as an auth token (it has none of the record auth token claims
 // and it is signed with the issuer asymmetric key instead of a record token secret).
 
 // ApplicationLaunchTokenType is the explicit "typ" header of the extension launch tokens.
 const ApplicationLaunchTokenType = "pb-launch+jwt"
 
+// ApplicationSessionTokenType is the explicit "typ" header of the embedded application session tokens
+// (same signing key and claims as the launch tokens, but reusable until they expire).
+const ApplicationSessionTokenType = "pb-session+jwt"
+
 // ApplicationLaunchTokenDuration is the extension launch token expiration duration.
 const ApplicationLaunchTokenDuration = 60 * time.Second
+
+// ApplicationSessionTokenDuration is the embedded application session token expiration duration.
+const ApplicationSessionTokenDuration = 60 * time.Second
 
 // applicationLaunchJtiRetention is the min time after the creation of a launch (online) session
 // before it could be deleted by the cleanup (its persisted launch token jti is the replay protection
@@ -81,6 +91,17 @@ type ApplicationLaunchClaims struct {
 //
 // The access checks are the caller responsibility (see [CheckApplicationExtensionAccess]).
 func NewApplicationLaunchToken(app App, claims ApplicationLaunchClaims) (string, error) {
+	return newApplicationExtensionToken(app, claims, ApplicationLaunchTokenType, ApplicationLaunchTokenDuration)
+}
+
+// NewApplicationSessionToken generates a new embedded application session token (see [ApplicationSessionTokenType]).
+//
+// The access checks are the caller responsibility (see [CheckApplicationExtensionAccess]).
+func NewApplicationSessionToken(app App, claims ApplicationLaunchClaims) (string, error) {
+	return newApplicationExtensionToken(app, claims, ApplicationSessionTokenType, ApplicationSessionTokenDuration)
+}
+
+func newApplicationExtensionToken(app App, claims ApplicationLaunchClaims, typ string, duration time.Duration) (string, error) {
 	if claims.ClientId == "" || claims.StaffId == "" || claims.StaffSessionId == "" ||
 		claims.InstallationId == "" || claims.Extension == "" {
 		return "", errors.New("missing required launch token claims")
@@ -101,7 +122,7 @@ func NewApplicationLaunchToken(app App, claims ApplicationLaunchClaims) (string,
 		"installation_id": claims.InstallationId,
 		"extension":       claims.Extension,
 		"iat":             now.Unix(),
-		"exp":             now.Add(ApplicationLaunchTokenDuration).Unix(),
+		"exp":             now.Add(duration).Unix(),
 		"jti":             security.RandomString(32),
 	}
 
@@ -112,7 +133,7 @@ func NewApplicationLaunchToken(app App, claims ApplicationLaunchClaims) (string,
 		}
 	}
 
-	return security.NewSignedJWTWithType(payload, signer, ApplicationLaunchTokenDuration, ApplicationLaunchTokenType)
+	return security.NewSignedJWTWithType(payload, signer, duration, typ)
 }
 
 // ParseApplicationLaunchToken verifies the provided extension launch token (signature and kid with the
@@ -121,6 +142,15 @@ func NewApplicationLaunchToken(app App, claims ApplicationLaunchClaims) (string,
 // The caller must still check the audience against the authenticated client, the installation,
 // the staff session and the jti single use (see the token endpoint token exchange grant).
 func ParseApplicationLaunchToken(app App, token string) (*ApplicationLaunchClaims, error) {
+	return parseApplicationExtensionToken(app, token, ApplicationLaunchTokenType)
+}
+
+// ParseApplicationSessionToken is the same as [ParseApplicationLaunchToken] for the session tokens.
+func ParseApplicationSessionToken(app App, token string) (*ApplicationLaunchClaims, error) {
+	return parseApplicationExtensionToken(app, token, ApplicationSessionTokenType)
+}
+
+func parseApplicationExtensionToken(app App, token string, typ string) (*ApplicationLaunchClaims, error) {
 	collection, err := app.FindCachedCollectionByNameOrId(CollectionNameApplicationInstallations)
 	if err != nil {
 		return nil, err
@@ -134,7 +164,7 @@ func ParseApplicationLaunchToken(app App, token string) (*ApplicationLaunchClaim
 	raw, err := security.ParseSignedJWTWithType(
 		token,
 		jwks,
-		ApplicationLaunchTokenType,
+		typ,
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
 		jwt.WithIssuer(OAuth2Issuer(app, collection)),

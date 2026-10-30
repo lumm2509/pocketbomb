@@ -30,6 +30,9 @@ const extLaunchTokenType = "urn:pocketbase:params:oauth:token-type:launch_token"
 func extInstall(t testing.TB, app core.App, handle string, grant core.Permissions) *core.ApplicationInstallResult {
 	t.Helper()
 
+	// the launch endpoints require the request origin (of the test requests) to be the issuer origin
+	app.Settings().Meta.AppURL = "http://example.com"
+
 	raw := `{
 		"handle": "` + handle + `",
 		"name": "Ext ` + handle + `",

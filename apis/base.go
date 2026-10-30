@@ -62,6 +62,7 @@ func NewRouter(app core.App) (*router.Router[*core.RequestEvent], error) {
 	// OAuth2 server (aka. OpenID Connect provider) routes
 	bindOAuth2ServerApi(app, pbRouter)
 	bindRecordAccessHooks(app)
+	bindApplicationProxyRoutes(app, pbRouter)
 
 	// UI routes
 	bindUIExtensions(app)

@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lumm2509/pocketbomb/tools/safehttp"
@@ -299,6 +300,13 @@ type ApplicationCatalogs struct {
 	// (catalog indexes, manifests, icons and install/uninstall notifications)
 	client *safehttp.Client
 
+	// proxyClient is the client of the app proxy requests (other timeout and limits)
+	proxyClient *safehttp.Client
+
+	// frameOrigins is the cached result of [ApplicationCatalogs.FrameOrigins]
+	frameOrigins           atomic.Pointer[[]string]
+	frameOriginsGeneration atomic.Uint64
+
 	cacheMu sync.Mutex
 	cache   map[string]*applicationCatalogCacheItem
 
@@ -309,9 +317,10 @@ type ApplicationCatalogs struct {
 
 func newApplicationCatalogs(app *BaseApp) *ApplicationCatalogs {
 	return &ApplicationCatalogs{
-		app:    app,
-		client: safehttp.NewClient(safehttp.Options{Timeout: applicationCatalogTimeout, UserAgent: applicationCatalogUserAgent}),
-		cache:  map[string]*applicationCatalogCacheItem{},
+		app:         app,
+		client:      safehttp.NewClient(safehttp.Options{Timeout: applicationCatalogTimeout, UserAgent: applicationCatalogUserAgent}),
+		proxyClient: safehttp.NewClient(safehttp.Options{Timeout: ApplicationProxyTimeout, UserAgent: applicationCatalogUserAgent}),
+		cache:       map[string]*applicationCatalogCacheItem{},
 	}
 }
 

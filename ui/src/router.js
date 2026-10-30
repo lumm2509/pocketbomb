@@ -156,6 +156,10 @@ app.routes.superuserOnly("#/applications", async (route) => {
     const { pageApplications } = await import("@/applications/pageApplications");
     return pageApplications(route);
 }, () => app.perms.can("applications"));
+app.routes.superuserOnly("#/apps/{handle}/{subpath...}", async (route) => {
+    const { pageApplicationFrame } = await import("@/applications/pageApplicationFrame");
+    return pageApplicationFrame(route);
+}, () => app.perms.can("applications"));
 app.routes.superuserOnly("#/settings", pageApplicationSettings, () => app.perms.can("settings"));
 app.routes.superuserOnly("#/settings/mail", pageMailSettings, () => app.perms.can("settings"));
 app.routes.superuserOnly("#/settings/storage", pageStorageSettings, () => app.perms.can("settings"));

@@ -63,6 +63,11 @@ import (
 //	path       = "/pb/posts"
 //	collection = "posts"                                 # required for (and only for) the record actions
 //
+//	[app_proxy]                                          # requires the write_app_proxy scope
+//	url     = "https://example.com/proxy"                # same host as application_url
+//	prefix  = "apps"                                     # a, apps, community or tools
+//	subpath = "reviews"                                  # ^[A-Za-z0-9_-]{1,30}$ (not admin, services, password or login)
+//
 // The webhooks topics can't be in the "application" lifecycle namespace (the applications learn about
 // their own lifecycle only through the install_url/uninstall_url notifications).
 //
@@ -133,6 +138,11 @@ var applicationManifestSchema = map[string]any{
 		"subscriptions": nil, // list of tables (see applicationManifestWebhookSchema)
 	},
 	"extensions": nil, // list of tables (see applicationManifestExtensionSchema)
+	"app_proxy": map[string]any{
+		"url":     nil,
+		"prefix":  nil,
+		"subpath": nil,
+	},
 }
 
 // applicationManifestWebhookSchema is the keys tree of a single webhooks.subscriptions item.
@@ -171,6 +181,19 @@ type ApplicationManifest struct {
 
 	// Extensions is the list of the declarative dashboard extensions (see [ApplicationExtensionTypes]).
 	Extensions []ApplicationManifestExtension `json:"extensions,omitzero"`
+
+	// AppProxy is the optional application proxy configuration (see [ApplicationProxyPrefixes]).
+	AppProxy *ApplicationManifestAppProxy `json:"app_proxy,omitzero"`
+}
+
+// ApplicationManifestAppProxy defines the manifest app_proxy table.
+type ApplicationManifestAppProxy struct {
+	// URL is the base proxy target url (on the application_url host; it always comes from the installed version).
+	URL string `json:"url"`
+
+	// Prefix and Subpath are the defaults of a new installation public path "/{prefix}/{subpath}".
+	Prefix  string `json:"prefix"`
+	Subpath string `json:"subpath"`
 }
 
 // ApplicationManifestExtension defines a single declarative manifest extension.
@@ -427,6 +450,13 @@ func applicationManifestFromMap(raw map[string]any) (*ApplicationManifest, error
 		manifest.Extensions = append(manifest.Extensions, ext)
 	}
 
+	if proxy, ok := raw["app_proxy"].(map[string]any); ok {
+		manifest.AppProxy = &ApplicationManifestAppProxy{}
+		str("app_proxy.url", proxy["url"], &manifest.AppProxy.URL)
+		str("app_proxy.prefix", proxy["prefix"], &manifest.AppProxy.Prefix)
+		str("app_proxy.subpath", proxy["subpath"], &manifest.AppProxy.Subpath)
+	}
+
 	if len(errs) > 0 {
 		return nil, errs
 	}
@@ -450,6 +480,13 @@ func (m *ApplicationManifest) Normalize() {
 	m.IconURL = strings.TrimSpace(m.IconURL)
 
 	normalizeScopes := func(scopes []string) []string {
+		scopes = slices.Clone(scopes)
+		for i, scope := range scopes {
+			if scope == ApplicationProxyManifestScope {
+				scopes[i] = OAuth2SystemScope(PermissionResourceAppProxy, PermissionLevelWrite)
+			}
+		}
+
 		result := list.ToUniqueStringSlice(scopes)
 		result = slices.DeleteFunc(result, func(s string) bool { return s == "" })
 		sort.Strings(result)
@@ -486,6 +523,12 @@ func (m *ApplicationManifest) Normalize() {
 	}
 	if len(m.Extensions) == 0 {
 		m.Extensions = nil
+	}
+
+	if m.AppProxy != nil {
+		m.AppProxy.URL = strings.TrimSpace(m.AppProxy.URL)
+		m.AppProxy.Prefix = strings.TrimSpace(m.AppProxy.Prefix)
+		m.AppProxy.Subpath = strings.TrimSpace(m.AppProxy.Subpath)
 	}
 }
 
@@ -563,6 +606,19 @@ func (m *ApplicationManifest) Validate() error {
 				"validation_extension_collection_not_allowed",
 				"The collection is allowed only for the {{.type}} extensions.",
 			).SetParams(map[string]any{"type": ApplicationExtensionTypeRecordAction}))
+		}
+	}
+
+	if proxy := m.AppProxy; proxy != nil {
+		set("app_proxy.url", validation.Validate(proxy.URL, validation.Required, validation.Length(1, 2000), validation.By(checkApplicationNotificationURL), validation.By(m.checkApplicationHost), validation.By(checkApplicationProxyURLShape)))
+		set("app_proxy.prefix", validation.Validate(proxy.Prefix, validation.Required, validation.By(checkApplicationProxyPrefix)))
+		set("app_proxy.subpath", validation.Validate(proxy.Subpath, validation.Required, validation.By(checkApplicationProxySubpath)))
+
+		if !slices.Contains(applicationManifestAllowedScopes(m), OAuth2SystemScope(PermissionResourceAppProxy, PermissionLevelWrite)) {
+			set("access.scopes", validation.NewError(
+				"validation_app_proxy_scope_required",
+				"The app_proxy table requires the "+ApplicationProxyManifestScope+" scope.",
+			))
 		}
 	}
 

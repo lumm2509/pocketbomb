@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -16,13 +18,87 @@ import (
 	"github.com/lumm2509/pocketbomb/core"
 	"github.com/lumm2509/pocketbomb/tools/hook"
 	"github.com/lumm2509/pocketbomb/tools/list"
+	"github.com/lumm2509/pocketbomb/tools/router"
 	"github.com/lumm2509/pocketbomb/tools/routine"
+	"github.com/lumm2509/pocketbomb/tools/security"
 	"github.com/lumm2509/pocketbomb/ui"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 )
 
 const defaultCSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' http://127.0.0.1:* https://tile.openstreetmap.org data: blob:; connect-src 'self' http://127.0.0.1:* https://nominatim.openstreetmap.org; script-src 'self' http://127.0.0.1:*; frame-ancestors 'none'"
+
+// requestEventKeyDashboardNonce is the event store key of the dashboard index script nonce.
+const requestEventKeyDashboardNonce = "__dashboardNonce"
+
+var dashboardScriptTagRegex = regexp.MustCompile(`<script\b`)
+
+// dashboardCSP returns the dashboard Content-Security-Policy of the request: [defaultCSP] with the scripts
+// limited to the ones started by the provided per-request nonce (the app proxy and pb_public paths share the
+// dashboard origin; none for the responses that aren't the index) and, when there are
+// active installations with extensions, the frame-src with exactly their origins.
+func dashboardCSP(app core.App, nonce string) string {
+	if nonce != "" {
+		return dashboardCSPWithScriptSrc(app, "script-src 'nonce-"+nonce+"' 'strict-dynamic'")
+	}
+
+	return dashboardCSPWithScriptSrc(app, "script-src 'none'")
+}
+
+func dashboardCSPWithScriptSrc(app core.App, scriptSrc string) string {
+	csp := strings.Replace(defaultCSP, "script-src 'self' http://127.0.0.1:*", scriptSrc, 1)
+
+	origins := app.ApplicationCatalogs().FrameOrigins()
+	if len(origins) == 0 {
+		return csp
+	}
+
+	return csp + "; frame-src " + strings.Join(origins, " ")
+}
+
+// bindDashboardRoute registers the dashboard static route: the index is served
+// with a per-request nonce on its script tags (the embedded files are never changed).
+func bindDashboardRoute(r *router.Router[*core.RequestEvent], distFS fs.FS) {
+	static := Static(distFS, false)
+
+	r.GET("/_/{path...}", func(e *core.RequestEvent) error {
+		nonce, _ := e.Get(requestEventKeyDashboardNonce).(string)
+		if nonce == "" {
+			return static(e)
+		}
+
+		index, err := fs.ReadFile(distFS, router.IndexPage)
+		if err != nil {
+			return static(e)
+		}
+
+		e.Set(requestEventKeySkipSuccessActivityLog, true)
+		e.Response.Header().Set("Cache-Control", "no-store")
+
+		return e.HTML(http.StatusOK, dashboardScriptTagRegex.ReplaceAllString(string(index), `<script nonce="`+nonce+`"`))
+	}).
+		BindFunc(func(e *core.RequestEvent) error {
+			if !e.App.IsDev() &&
+				// exclude root path
+				e.Request.PathValue(StaticWildcardParam) != "" &&
+				e.Response.Header().Get("Cache-Control") == "" {
+				e.Response.Header().Set("Cache-Control", "max-age=1209600, stale-while-revalidate=86400")
+			}
+
+			nonce := ""
+			if e.Request.PathValue(StaticWildcardParam) == "" {
+				nonce = security.RandomString(32)
+				e.Set(requestEventKeyDashboardNonce, nonce)
+			}
+
+			if e.Response.Header().Get("Content-Security-Policy") == "" {
+				e.Response.Header().Set("Content-Security-Policy", dashboardCSP(e.App, nonce))
+			}
+
+			return e.Next()
+		}).
+		Bind(Gzip())
+}
 
 // ServeConfig defines a configuration struct for apis.Serve().
 type ServeConfig struct {
@@ -81,22 +157,7 @@ func Serve(app core.App, config ServeConfig) error {
 
 	// @todo consider moving in base
 	if ui.DistDirFS != nil {
-		pbRouter.GET("/_/{path...}", Static(ui.DistDirFS, false)).
-			BindFunc(func(e *core.RequestEvent) error {
-				if !e.App.IsDev() &&
-					// exclude root path
-					e.Request.PathValue(StaticWildcardParam) != "" &&
-					e.Response.Header().Get("Cache-Control") == "" {
-					e.Response.Header().Set("Cache-Control", "max-age=1209600, stale-while-revalidate=86400")
-				}
-
-				if e.Response.Header().Get("Content-Security-Policy") == "" {
-					e.Response.Header().Set("Content-Security-Policy", defaultCSP)
-				}
-
-				return e.Next()
-			}).
-			Bind(Gzip())
+		bindDashboardRoute(pbRouter, ui.DistDirFS)
 	}
 
 	// start http server

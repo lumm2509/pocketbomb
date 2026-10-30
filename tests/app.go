@@ -786,6 +786,22 @@ func NewTestAppWithConfig(config core.BaseAppConfig) (*TestApp, error) {
 		Priority: -99999,
 	})
 
+	t.OnGraphQLSchemaApplyRequest().Bind(&hook.Handler[*core.GraphQLSchemaApplyRequestEvent]{
+		Func: func(e *core.GraphQLSchemaApplyRequestEvent) error {
+			t.registerEventCall("OnGraphQLSchemaApplyRequest")
+			return e.Next()
+		},
+		Priority: -99999,
+	})
+
+	t.OnApplicationProxyRequest().Bind(&hook.Handler[*core.ApplicationProxyRequestEvent]{
+		Func: func(e *core.ApplicationProxyRequestEvent) error {
+			t.registerEventCall("OnApplicationProxyRequest")
+			return e.Next()
+		},
+		Priority: -99999,
+	})
+
 	t.OnApplicationUninstallRequest().Bind(&hook.Handler[*core.ApplicationUninstallRequestEvent]{
 		Func: func(e *core.ApplicationUninstallRequestEvent) error {
 			t.registerEventCall("OnApplicationUninstallRequest")

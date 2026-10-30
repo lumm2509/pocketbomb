@@ -127,6 +127,7 @@ func (app *BaseApp) installApplication(application *Application, grant Permissio
 		installation.Set("installedBy", installedBy)
 		installation.Set("status", status)
 		installation.Set("webhookSecret", result.WebhookSecret)
+		assignApplicationInstallationProxyPath(installation, manifest)
 		if err := txApp.Save(installation); err != nil {
 			return err
 		}
@@ -169,6 +170,7 @@ func (app *BaseApp) installApplication(application *Application, grant Permissio
 			scopes:         scopes,
 			clientSecret:   result.ClientSecret,
 			webhookSecret:  result.WebhookSecret,
+			proxyPath:      result.Installation.ProxyPathPrefix(),
 		})
 		if notifyErr != nil {
 			// rollback (the pending installations are deleted without uninstall notifications)
@@ -294,6 +296,7 @@ func (app *BaseApp) rotateApplicationInstallationSecret(installation *Applicatio
 				scopes:         ApplicationGrantScopes(app, installation.Permissions()),
 				clientSecret:   secret,
 				webhookSecret:  webhookSecret,
+				proxyPath:      installation.ProxyPathPrefix(),
 			})
 			if err != nil {
 				return client, secret, err
@@ -335,6 +338,8 @@ func (app *BaseApp) updateApplicationInstallation(installation *ApplicationInsta
 	var oldScopes []string
 	var application *Application
 	var version *ApplicationVersion
+	var manifest *ApplicationManifest
+	var proxyAssigned bool
 
 	txErr := app.RunInTransaction(func(txApp App) error {
 		fresh, err := txApp.FindApplicationInstallationById(installation.Id)
@@ -359,7 +364,7 @@ func (app *BaseApp) updateApplicationInstallation(installation *ApplicationInsta
 			return validation.Errors{"versionRef": validation.NewError("validation_invalid_version", "The version must belong to the installed application.")}
 		}
 
-		manifest, err := version.Manifest()
+		manifest, err = version.Manifest()
 		if err != nil {
 			return err
 		}
@@ -375,6 +380,7 @@ func (app *BaseApp) updateApplicationInstallation(installation *ApplicationInsta
 		if fresh.WebhookSecret() == "" {
 			fresh.Set("webhookSecret", security.RandomString(applicationWebhookSecretLength))
 		}
+		proxyAssigned = assignApplicationInstallationProxyPath(fresh, manifest)
 		if err := txApp.Save(fresh); err != nil {
 			return err
 		}
@@ -389,6 +395,10 @@ func (app *BaseApp) updateApplicationInstallation(installation *ApplicationInsta
 	})
 	if txErr != nil {
 		return txErr
+	}
+
+	if proxyAssigned && installation.IsActive() {
+		app.notifyApplicationProxyUpdated(installation, application, version, manifest)
 	}
 
 	newScopes := ApplicationGrantScopes(app, installation.Permissions())

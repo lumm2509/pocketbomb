@@ -20,6 +20,7 @@ func TestRedactLogURL(t *testing.T) {
 	}{
 		{"/api/collections/users/records", nil, []string{"/api/collections/users/records"}},
 		{"/api/files/c/r/f.txt?token=FILE_TOKEN&thumb=100x100", []string{"FILE_TOKEN"}, []string{"thumb=100x100", "token=REDACTED"}},
+		{"/apps/reviews/x?signature=PROXY_SIGNATURE&a=1", []string{"PROXY_SIGNATURE"}, []string{"a=1"}},
 		{"/oauth2/users/password-reset/confirm?token=RESET_TOKEN", []string{"RESET_TOKEN"}, nil},
 		{"/oauth2/users/verify-email?token=VERIFY_TOKEN", []string{"VERIFY_TOKEN"}, nil},
 		{"/oauth2/users/email-change/confirm?token=CHANGE_TOKEN", []string{"CHANGE_TOKEN"}, nil},

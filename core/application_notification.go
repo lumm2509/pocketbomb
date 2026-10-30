@@ -16,6 +16,7 @@ const (
 	ApplicationEventUninstalled        = "application.uninstalled"
 	ApplicationEventCredentialsRotated = "application.credentials_rotated"
 	ApplicationEventScopesUpdate       = "application.scopes_update"
+	ApplicationEventAppProxyUpdated    = "application.app_proxy_updated"
 )
 
 // applicationNotificationDuration is the notification JWT expiration duration.
@@ -52,6 +53,9 @@ type applicationNotification struct {
 	// secrets (installed and credentials rotated only)
 	clientSecret  string
 	webhookSecret string
+
+	// proxyPath is the installation public app proxy path (if any)
+	proxyPath string
 }
 
 // newApplicationNotificationJWT returns the notification JWT signed with the active signing key
@@ -83,6 +87,10 @@ func newApplicationNotificationJWT(app App, n *applicationNotification) (string,
 	}
 	if n.webhookSecret != "" {
 		claims["webhook_secret"] = n.webhookSecret
+	}
+
+	if n.proxyPath != "" {
+		claims["app_proxy_path_prefix"] = n.proxyPath
 	}
 
 	return security.NewSignedJWT(claims, signer, applicationNotificationDuration)

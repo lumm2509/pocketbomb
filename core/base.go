@@ -221,6 +221,8 @@ type BaseApp struct {
 	onApplicationUninstall             *hook.Hook[*ApplicationUninstallEvent]
 	onApplicationManifestImportRequest *hook.Hook[*ApplicationManifestImportRequestEvent]
 	onApplicationInstallRequest        *hook.Hook[*ApplicationInstallRequestEvent]
+	onApplicationProxyRequest          *hook.Hook[*ApplicationProxyRequestEvent]
+	onGraphQLSchemaApplyRequest        *hook.Hook[*GraphQLSchemaApplyRequestEvent]
 	onApplicationUninstallRequest      *hook.Hook[*ApplicationUninstallRequestEvent]
 
 	// LLM event hooks
@@ -398,6 +400,8 @@ func (app *BaseApp) initHooks() {
 	app.onApplicationUninstall = &hook.Hook[*ApplicationUninstallEvent]{}
 	app.onApplicationManifestImportRequest = &hook.Hook[*ApplicationManifestImportRequestEvent]{}
 	app.onApplicationInstallRequest = &hook.Hook[*ApplicationInstallRequestEvent]{}
+	app.onApplicationProxyRequest = &hook.Hook[*ApplicationProxyRequestEvent]{}
+	app.onGraphQLSchemaApplyRequest = &hook.Hook[*GraphQLSchemaApplyRequestEvent]{}
 	app.onApplicationUninstallRequest = &hook.Hook[*ApplicationUninstallRequestEvent]{}
 
 	// LLM event hooks
@@ -1337,6 +1341,14 @@ func (app *BaseApp) OnApplicationSecretRotate() *hook.Hook[*ApplicationSecretRot
 
 func (app *BaseApp) OnApplicationUninstall() *hook.Hook[*ApplicationUninstallEvent] {
 	return app.onApplicationUninstall
+}
+
+func (app *BaseApp) OnGraphQLSchemaApplyRequest() *hook.Hook[*GraphQLSchemaApplyRequestEvent] {
+	return app.onGraphQLSchemaApplyRequest
+}
+
+func (app *BaseApp) OnApplicationProxyRequest() *hook.Hook[*ApplicationProxyRequestEvent] {
+	return app.onApplicationProxyRequest
 }
 
 func (app *BaseApp) OnApplicationManifestImportRequest() *hook.Hook[*ApplicationManifestImportRequestEvent] {

@@ -468,6 +468,7 @@ var logRedactedQueryParams = []string{
 	"code_verifier",
 	"password",
 	"otp",
+	"signature",
 	APIKeyPublicQueryParam,
 }
 
