@@ -1613,7 +1613,7 @@ func TestHooksBindsCount(t *testing.T) {
 	vm := goja.New()
 	hooksBinds(app, vm, nil)
 
-	testBindsCount(vm, "this", 95, t) // + the application operation (5) and request (3) hooks and onGraphQLRequest
+	testBindsCount(vm, "this", 97, t) // + the application operation (5) and request (4) hooks, onGraphQLRequest and onGraphQLSchemaApplyRequest
 }
 
 func TestHooksBinds(t *testing.T) {
