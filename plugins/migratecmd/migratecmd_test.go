@@ -163,6 +163,7 @@ migrate((app) => {
         "title": ""
       },
       "refreshTokenDuration": 2592000,
+      "resources": [],
       "scopes": [],
       "sessionDuration": 1209600
     },
@@ -360,6 +361,7 @@ func init() {
 					"title": ""
 				},
 				"refreshTokenDuration": 2592000,
+				"resources": [],
 				"scopes": [],
 				"sessionDuration": 1209600
 			},
@@ -646,6 +648,7 @@ migrate((app) => {
         "title": ""
       },
       "refreshTokenDuration": 2592000,
+      "resources": [],
       "scopes": [],
       "sessionDuration": 1209600
     },
@@ -846,6 +849,7 @@ func init() {
 					"title": ""
 				},
 				"refreshTokenDuration": 2592000,
+				"resources": [],
 				"scopes": [],
 				"sessionDuration": 1209600
 			},

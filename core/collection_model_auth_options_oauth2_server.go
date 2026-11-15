@@ -63,6 +63,12 @@ type OAuth2ServerConfig struct {
 	// clients can request in addition to the [OAuth2BuiltinScopes].
 	Scopes []string `form:"scopes" json:"scopes"`
 
+	// Resources is the list of the protected resources (aka. resource servers) the clients
+	// of the collection could request JWT access tokens for (see [OAuth2Resource]).
+	//
+	// Each client must be explicitly allowed to use a resource (see [OAuth2Client.Resources]).
+	Resources []OAuth2Resource `form:"resources" json:"resources"`
+
 	// SigningKeys is a list of the asymmetric keys used for signing the OpenID Connect id_tokens.
 	//
 	// The latest created active key is used for signing new tokens.
@@ -166,6 +172,7 @@ func (c OAuth2ServerConfig) Validate() error {
 			// note: the reserved scope prefixes are checked by the collection validator
 			// only for the newly added scopes (see [CheckNewOAuth2ReservedScopes])
 		),
+		validation.Field(&c.Resources, validation.By(checkForDuplicatedOAuth2Resources)),
 		validation.Field(&c.LoginPage),
 		// note: the keys are not required because a new active key is
 		// auto generated on collection save if there is none

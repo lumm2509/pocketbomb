@@ -1836,8 +1836,10 @@ type App interface {
 	// (authorization code exchange, refresh token rotation or token exchange)
 	// right before generating the access, refresh and id tokens.
 	//
-	// Could be used to additionally validate the request or to add
-	// custom id_token claims (see [OAuth2TokenRequestEvent.IdTokenClaims]).
+	// Could be used to additionally validate the request, to add
+	// custom id_token claims (see [OAuth2TokenRequestEvent.IdTokenClaims]) or
+	// custom claims to the JWT access token of a requested protected resource
+	// (see [OAuth2TokenRequestEvent.Resource] and [OAuth2TokenRequestEvent.AccessTokenClaims]).
 	//
 	// If the optional "tags" list (auth Collection ids or names) is specified,
 	// then all event handlers registered via the created hook will be

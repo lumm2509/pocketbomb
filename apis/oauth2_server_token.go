@@ -43,6 +43,10 @@ type oauth2TokenForm struct {
 	RefreshToken string `form:"refresh_token" json:"refresh_token"`
 	Scope        string `form:"scope" json:"scope"`
 
+	// Resource is the requested protected resource (Resource Indicators, RFC 8707);
+	// only one per request is supported.
+	Resource []string `form:"resource" json:"resource"`
+
 	// token exchange (RFC 8693)
 	SubjectToken       string `form:"subject_token" json:"subject_token"`
 	SubjectTokenType   string `form:"subject_token_type" json:"subject_token_type"`
@@ -104,11 +108,18 @@ func oauth2ServerToken(e *core.RequestEvent) error {
 		return oauth2JSONError(e, newOAuth2Error(http.StatusBadRequest, oauth2ErrUnauthorizedClient, "The client is not allowed to use this grant_type."))
 	}
 
+	// resolved before the grant processing so that an invalid
+	// target doesn't consume the authorization code
+	resource, err := oauth2TokenResource(collection, client, form)
+	if err != nil {
+		return oauth2JSONError(e, err)
+	}
+
 	switch form.GrantType {
 	case oauth2GrantTypeAuthorizationCode:
-		err = oauth2TokenAuthorizationCode(e, collection, client, form)
+		err = oauth2TokenAuthorizationCode(e, collection, client, form, resource)
 	case oauth2GrantTypeRefreshToken:
-		err = oauth2TokenRefresh(e, collection, client, form)
+		err = oauth2TokenRefresh(e, collection, client, form, resource)
 	case oauth2GrantTypeTokenExchange:
 		err = oauth2TokenExchange(e, collection, client, form)
 	case oauth2GrantTypeClientCredentials:
@@ -124,6 +135,37 @@ func oauth2ServerToken(e *core.RequestEvent) error {
 	}
 
 	return err
+}
+
+// oauth2TokenResource resolves the protected resource of the token request
+// "resource" parameter (Resource Indicators, RFC 8707 section 2.2).
+//
+// It returns nil without error when the parameter is not set (the server own access token).
+//
+// The resource must be registered in the issuer collection (see [core.OAuth2ServerConfig.Resources])
+// and allowed for the client (see [core.OAuth2Client.Resources]). Only one resource per request
+// is supported and only for the authorization_code and refresh_token grants (the resource tokens
+// of a session are obtained with refresh token requests, one per resource).
+func oauth2TokenResource(collection *core.Collection, client *core.OAuth2Client, form oauth2TokenForm) (*core.OAuth2Resource, error) {
+	identifiers := list.ToUniqueStringSlice(form.Resource)
+	if len(identifiers) == 0 {
+		return nil, nil
+	}
+
+	if len(identifiers) > 1 {
+		return nil, newOAuth2Error(http.StatusBadRequest, oauth2ErrInvalidTarget, "Only one resource per token request is supported.")
+	}
+
+	if form.GrantType != oauth2GrantTypeAuthorizationCode && form.GrantType != oauth2GrantTypeRefreshToken {
+		return nil, newOAuth2Error(http.StatusBadRequest, oauth2ErrInvalidTarget, "The resource parameter is not supported for this grant_type.")
+	}
+
+	resource, ok := collection.OAuth2Server.FindResource(identifiers[0])
+	if !ok || client.CollectionRef() != collection.Id || !client.AllowsResource(resource.Identifier) {
+		return nil, newOAuth2Error(http.StatusBadRequest, oauth2ErrInvalidTarget, "The resource is unknown or not allowed for the client.")
+	}
+
+	return &resource, nil
 }
 
 // oauth2ClientGrantType returns the client "grantTypes" value of the provided
@@ -148,7 +190,7 @@ func oauth2InvalidGrantError(description string) *oauth2Error {
 }
 
 // oauth2TokenAuthorizationCode handles the authorization_code grant (RFC 6749 section 4.1.3 + RFC 7636).
-func oauth2TokenAuthorizationCode(e *core.RequestEvent, collection *core.Collection, client *core.OAuth2Client, form oauth2TokenForm) error {
+func oauth2TokenAuthorizationCode(e *core.RequestEvent, collection *core.Collection, client *core.OAuth2Client, form oauth2TokenForm, resource *core.OAuth2Resource) error {
 	if form.Code == "" {
 		return newOAuth2Error(http.StatusBadRequest, oauth2ErrInvalidRequest, "Missing code parameter.")
 	}
@@ -241,11 +283,13 @@ func oauth2TokenAuthorizationCode(e *core.RequestEvent, collection *core.Collect
 	event.RequestEvent = e
 	event.Collection = collection
 	event.GrantType = oauth2GrantTypeAuthorizationCode
+	event.Resource = resource
 	event.Client = client
 	event.Record = record
 	event.Session = session
 	event.Scopes = scopes
 	event.IdTokenClaims = map[string]any{}
+	event.AccessTokenClaims = map[string]any{}
 
 	return e.App.OnOAuth2TokenRequest().Trigger(event, func(e *core.OAuth2TokenRequestEvent) error {
 		if err := e.App.Save(e.Session); err != nil {
@@ -262,7 +306,7 @@ func oauth2TokenAuthorizationCode(e *core.RequestEvent, collection *core.Collect
 
 // oauth2TokenRefresh handles the refresh_token grant (RFC 6749 section 6)
 // with refresh token rotation and reuse detection (RFC 9700 section 4.14.2).
-func oauth2TokenRefresh(e *core.RequestEvent, collection *core.Collection, client *core.OAuth2Client, form oauth2TokenForm) error {
+func oauth2TokenRefresh(e *core.RequestEvent, collection *core.Collection, client *core.OAuth2Client, form oauth2TokenForm, resource *core.OAuth2Resource) error {
 	if form.RefreshToken == "" {
 		return newOAuth2Error(http.StatusBadRequest, oauth2ErrInvalidRequest, "Missing refresh_token parameter.")
 	}
@@ -304,11 +348,13 @@ func oauth2TokenRefresh(e *core.RequestEvent, collection *core.Collection, clien
 	event.RequestEvent = e
 	event.Collection = collection
 	event.GrantType = oauth2GrantTypeRefreshToken
+	event.Resource = resource
 	event.Client = client
 	event.Record = record
 	event.Session = session
 	event.Scopes = scopes
 	event.IdTokenClaims = map[string]any{}
+	event.AccessTokenClaims = map[string]any{}
 
 	return e.App.OnOAuth2TokenRequest().Trigger(event, func(e *core.OAuth2TokenRequestEvent) error {
 		// rotate in a transaction to ensure that concurrent requests
@@ -487,6 +533,7 @@ func oauth2TokenExchange(e *core.RequestEvent, collection *core.Collection, clie
 	event.Session = session
 	event.Scopes = scopes
 	event.IdTokenClaims = map[string]any{}
+	event.AccessTokenClaims = map[string]any{}
 
 	return e.App.OnOAuth2TokenRequest().Trigger(event, func(e *core.OAuth2TokenRequestEvent) error {
 		if err := e.App.Save(e.Session); err != nil {
@@ -628,6 +675,7 @@ func oauth2TokenExchangeLaunch(e *core.RequestEvent, collection *core.Collection
 	event.Session = session
 	event.Scopes = scopes
 	event.IdTokenClaims = map[string]any{}
+	event.AccessTokenClaims = map[string]any{}
 
 	return e.App.OnOAuth2TokenRequest().Trigger(event, func(e *core.OAuth2TokenRequestEvent) error {
 		// note: a concurrent exchange of the same launch token fails on the launchJti unique index
@@ -701,6 +749,7 @@ func oauth2TokenClientCredentials(e *core.RequestEvent, collection *core.Collect
 	event.Session = session
 	event.Scopes = scopes
 	event.IdTokenClaims = map[string]any{}
+	event.AccessTokenClaims = map[string]any{}
 
 	return e.App.OnOAuth2TokenRequest().Trigger(event, func(e *core.OAuth2TokenRequestEvent) error {
 		if err := e.App.Save(e.Session); err != nil {
@@ -716,7 +765,24 @@ func oauth2WriteTokenResponse(e *core.OAuth2TokenRequestEvent, refreshToken stri
 		return err
 	}
 
-	accessToken, err := e.Session.NewAccessToken()
+	var accessToken string
+	var expiresIn int64
+	var err error
+
+	if e.Resource != nil {
+		// JWT access token of a protected resource (RFC 9068), verified offline by the resource server
+		accessToken, err = e.Session.NewResourceAccessToken(core.OAuth2ResourceAccessTokenOptions{
+			Issuer:      core.OAuth2Issuer(e.App, e.Collection),
+			Resource:    *e.Resource,
+			ExtraClaims: e.AccessTokenClaims,
+		})
+		expiresIn = e.Resource.AccessTokenDuration
+	} else {
+		accessToken, err = e.Session.NewAccessToken()
+		// note: the access token duration of the actor collection
+		// (it differs from the issuer collection only for the online tokens)
+		expiresIn = e.Record.Collection().AuthToken.Duration
+	}
 	if err != nil {
 		return err
 	}
@@ -724,11 +790,9 @@ func oauth2WriteTokenResponse(e *core.OAuth2TokenRequestEvent, refreshToken stri
 	scopes := e.Session.Scopes()
 
 	result := oauth2TokenResponse{
-		AccessToken: accessToken,
-		TokenType:   "Bearer",
-		// note: the access token duration of the actor collection
-		// (it differs from the issuer collection only for the online tokens)
-		ExpiresIn:    e.Record.Collection().AuthToken.Duration,
+		AccessToken:  accessToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    expiresIn,
 		Scope:        strings.Join(scopes, " "),
 		RefreshToken: refreshToken,
 	}

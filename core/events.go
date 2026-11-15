@@ -741,6 +741,20 @@ type OAuth2TokenRequestEvent struct {
 	// IdTokenClaims is an optional map with custom claims that will be
 	// added to the generated id_token (see [OIDCIdTokenOptions.ExtraClaims]).
 	IdTokenClaims map[string]any
+
+	// Resource is the protected resource the access token is requested for
+	// (the token request "resource" parameter, RFC 8707) or nil for the
+	// server own access token.
+	Resource *OAuth2Resource
+
+	// AccessTokenClaims is an optional map with custom claims that will be
+	// added to the generated JWT access token of the requested Resource
+	// (see [OAuth2ResourceAccessTokenOptions.ExtraClaims]), e.g. the actor roles
+	// that the resource server authorizes with.
+	//
+	// They can't replace the [OAuth2ResourceRegisteredClaims] and they are
+	// not used for the server own access tokens (Resource is nil).
+	AccessTokenClaims map[string]any
 }
 
 type OAuth2RevokeRequestEvent struct {

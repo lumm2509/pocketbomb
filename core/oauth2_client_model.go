@@ -361,6 +361,24 @@ func (m *OAuth2Client) SetScopes(scopes []string) {
 	m.Set("scopes", scopes)
 }
 
+// Resources returns the "resources" record field value: the identifiers of the
+// protected resources of the client issuer the client could request access tokens for
+// (see [OAuth2Resource]).
+func (m *OAuth2Client) Resources() []string {
+	return m.GetStringSlice("resources")
+}
+
+// SetResources updates the "resources" record field value.
+func (m *OAuth2Client) SetResources(identifiers []string) {
+	m.Set("resources", identifiers)
+}
+
+// AllowsResource reports whether the client is allowed to request
+// access tokens for the provided resource identifier.
+func (m *OAuth2Client) AllowsResource(identifier string) bool {
+	return identifier != "" && slices.Contains(m.Resources(), identifier)
+}
+
 // FirstParty returns the "firstParty" record field value.
 func (m *OAuth2Client) FirstParty() bool {
 	return m.GetBool("firstParty")
@@ -480,6 +498,18 @@ func (app *BaseApp) registerOAuth2ClientHooks() {
 					})))
 					if err != nil {
 						errs["scopes"] = err
+					}
+
+					err = validation.Validate(client.Resources(), validation.Each(validation.By(func(value any) error {
+						v, _ := value.(string)
+						if _, ok := collection.OAuth2Server.FindResource(v); !ok {
+							return validation.NewError("validation_unknown_resource", "Unknown resource {{.resource}}.").
+								SetParams(map[string]any{"resource": v})
+						}
+						return nil
+					})))
+					if err != nil {
+						errs["resources"] = err
 					}
 				}
 			}
@@ -618,6 +648,10 @@ func validateManagedOAuth2Client(app App, client *OAuth2Client, isInstallationsI
 
 	if len(client.Scopes()) > 0 {
 		fixed("scopes")
+	}
+
+	if len(client.Resources()) > 0 {
+		fixed("resources")
 	}
 }
 

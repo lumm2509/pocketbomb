@@ -36,6 +36,7 @@ const (
 	oauth2ErrInvalidClient           = "invalid_client"
 	oauth2ErrInvalidGrant            = "invalid_grant"
 	oauth2ErrInvalidScope            = "invalid_scope"
+	oauth2ErrInvalidTarget           = "invalid_target" // RFC 8707 section 2
 	oauth2ErrInvalidToken            = "invalid_token"
 	oauth2ErrInsufficientScope       = "insufficient_scope"
 	oauth2ErrUnauthorizedClient      = "unauthorized_client"
