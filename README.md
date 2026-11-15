@@ -39,6 +39,7 @@ for every upstream feature. The main differences at the moment are:
 |------|----------------------|
 | GraphQL read API | Built-in, enabled by default at `/api/graphql` (queries only, Relay connections, introspection, depth/cost limits). |
 | Auth | Vanilla PocketBase auth was replaced by **OAuth2/OIDC** (authorization code + PKCE, refresh rotation, token exchange, hosted login/consent pages). |
+| Resource servers | Protected resources per issuer (**Resource Indicators**, RFC 8707): the allowed clients get **JWT access tokens** (RFC 9068, `typ: at+jwt`) for other services, verifiable offline with the issuer JWKS, with custom claims from `OnOAuth2TokenRequest`. |
 | Authorization | Real **RBAC** with the built-in `Owner` role, staff roles, per-collection/system permissions and scopes. |
 | API keys | Public and private keys bound to OAuth2 clients, with allowed origins, buyer IP and permission ceilings. |
 | Applications | Application catalog, manifests, installs/uninstalls, managed OAuth2 clients and dashboard extensions. |
@@ -149,6 +150,47 @@ discover the generated types and fields.
 
 The `OnGraphQLRequest` hook is available in Go and JSVM to inspect or modify the query,
 variables and operation name, or to short-circuit the request.
+
+### Protected resources (resource servers)
+
+Other services of a platform (e.g. a payments API) can authorize the users of an auth
+collection without calling PocketBomb on every request:
+
+1. Register the service as a protected resource of the issuer collection
+   (**Collection options -> OAuth2 / OIDC provider -> Protected resources**, or
+   `collection.OAuth2Server.Resources`): an identifier (absolute URI without query and
+   fragment, e.g. `https://payments.example.com` or `urn:example:payments`) and the
+   access token duration (keep it short, default 300s).
+2. Allow the OAuth2 clients that call it (**Settings -> OAuth2 clients -> Allowed resources**).
+3. The client requests a token for it with the `resource` token request parameter
+   (`authorization_code` or `refresh_token` grant, one resource per request):
+
+   ```sh
+   curl -X POST https://example.com/oauth2/users/token \
+     -d grant_type=refresh_token -d client_id=web -d refresh_token=... \
+     -d resource=https://payments.example.com
+   ```
+
+The issued `access_token` is a JWT access token (RFC 9068) signed with the collection
+signing keys: header `typ: at+jwt` and `kid`, claims `iss`, `sub`, `aud` (the resource),
+`client_id`, `scope`, `sid`, `jti`, `iat`, `exp`, `auth_time` and `act` (impersonation).
+The resource server verifies it with `{issuer}/jwks.json` and must check the `typ`
+header, `iss`, `aud` and `exp`. Unknown or not allowed resources fail with `invalid_target`.
+
+Custom claims (e.g. the actor roles) are added from the token hook; they can't replace
+the registered ones:
+
+```go
+app.OnOAuth2TokenRequest("users").BindFunc(func(e *core.OAuth2TokenRequestEvent) error {
+    if e.Resource != nil && e.Resource.Identifier == "https://payments.example.com" {
+        e.AccessTokenClaims["roles"] = []string{"customer"}
+    }
+    return e.Next()
+})
+```
+
+The resource tokens are not accepted by PocketBomb itself, and since they are verified
+offline a revoked session is cut off when they expire (the refresh token is rejected right away).
 
 ### Building and running the repo example
 
