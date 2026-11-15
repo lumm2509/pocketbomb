@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -182,10 +183,9 @@ func (app *BaseApp) registerNotifyWatcherHooks() {
 		}
 
 		if notifyWatcher != nil {
-			if err := os.WriteFile(settingsFile, nil, 0644); err != nil {
+			if err := touchNotifyFile(settingsFile); err != nil {
 				e.App.Logger().Warn("Failed to write watcher file", "error", err, "file", settingsFile)
 			}
-			_ = os.Remove(settingsFile)
 		}
 
 		return nil
@@ -209,10 +209,9 @@ func (app *BaseApp) registerNotifyWatcherHooks() {
 		}
 
 		if notifyWatcher != nil {
-			if err := os.WriteFile(collectionsFile, nil, 0644); err != nil {
+			if err := touchNotifyFile(collectionsFile); err != nil {
 				e.App.Logger().Warn("Failed to write watcher file", "error", err, "file", collectionsFile)
 			}
-			_ = os.Remove(collectionsFile)
 		}
 
 		return nil
@@ -232,6 +231,16 @@ func (app *BaseApp) registerNotifyWatcherHooks() {
 		Func:     collectionsNotify,
 		Priority: 999,
 	})
+}
+
+// touchNotifyFile writes a new unique content to the instance notify file
+// so that the other instances watching the notify dir get a create/write event.
+//
+// note: the file is kept until the instance terminates; writing and removing it right away
+// is not reliably observable by all fsnotify backends (e.g. kqueue on macOS rescans the
+// directory after the write and could see only the removal, which is ignored as a cleanup event).
+func touchNotifyFile(path string) error {
+	return os.WriteFile(path, []byte(strconv.FormatInt(time.Now().UnixNano(), 10)), 0644)
 }
 
 func createNotifyDirWatcher(app App, instanceId string, localNotifyDirPath string) (*notifyWatcherState, error) {
