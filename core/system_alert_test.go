@@ -78,13 +78,30 @@ func TestSendSystemAlertToAllSuperusers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := createTestSuperusers(testApp, 3); err != nil {
+	if err := createTestSuperusers(testApp, 4); err != nil {
 		t.Fatal(err)
+	}
+
+	// the alerts are sent only to the Owners (the 4th superuser is a regular staff member)
+	for i := 1; i <= 3; i++ {
+		owner, err := testApp.FindAuthRecordByEmail(CollectionNameSuperusers, "test"+strconv.Itoa(i)+"@example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := testApp.AssignOwnerRole(owner); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	var sendCalls int
 	testApp.OnMailerSend().BindFunc(func(e *MailerEvent) error {
 		sendCalls++
+
+		for _, to := range e.Message.To {
+			if to.Address == "test4@example.com" {
+				t.Fatalf("The system alert must not be sent to a non-Owner superuser")
+			}
+		}
 
 		if !strings.Contains(e.Message.Subject, "test_subject") {
 			t.Fatalf("Missing %q in Message.Subject:\n%s", "test_subject", e.Message.Subject)
