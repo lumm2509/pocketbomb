@@ -45,6 +45,7 @@ function newClientData(collectionId) {
         redirectURIs: [""],
         postLogoutRedirectURIs: [],
         scopes: ["openid", "email", "profile"],
+        resources: [],
         firstParty: false,
         logo: "",
         disabled: false,
@@ -56,6 +57,7 @@ function normalizeClient(raw) {
     c.redirectURIs = Array.isArray(c.redirectURIs) ? c.redirectURIs : [];
     c.postLogoutRedirectURIs = Array.isArray(c.postLogoutRedirectURIs) ? c.postLogoutRedirectURIs : [];
     c.scopes = Array.isArray(c.scopes) ? c.scopes : [];
+    c.resources = Array.isArray(c.resources) ? c.resources : [];
     return c;
 }
 
@@ -67,6 +69,7 @@ const editableKeys = [
     "redirectURIs",
     "postLogoutRedirectURIs",
     "scopes",
+    "resources",
     "firstParty",
     "logo",
     "disabled",
@@ -125,6 +128,10 @@ function oauth2ClientUpsertModal(rawClient, settings) {
         get allowedScopes() {
             return oauth2AllowedScopes(data.collection);
         },
+        // the protected resources registered in the issuer collection options
+        get issuerResources() {
+            return data.collection?.oauth2Server?.resources || [];
+        },
         get isConfidential() {
             return data.client.type == "confidential";
         },
@@ -144,6 +151,10 @@ function oauth2ClientUpsertModal(rawClient, settings) {
         const allowed = oauth2AllowedScopes(data.collection);
         data.client.scopes = data.client.scopes.filter((s) => allowed.includes(s));
 
+        // keep only the resources registered in the new issuer
+        const resources = (data.collection?.oauth2Server?.resources || []).map((r) => r.identifier);
+        data.client.resources = data.client.resources.filter((r) => resources.includes(r));
+
         if (data.isSuperusersIssuer) {
             data.client.firstParty = true;
         }
@@ -156,6 +167,15 @@ function oauth2ClientUpsertModal(rawClient, settings) {
         }
         // keep the predefined order
         data.client.scopes = data.allowedScopes.filter((s) => scopes.includes(s));
+    }
+
+    function toggleResource(identifier, checked) {
+        const resources = data.client.resources.filter((r) => r != identifier);
+        if (checked) {
+            resources.push(identifier);
+        }
+        // keep the issuer order
+        data.client.resources = data.issuerResources.map((r) => r.identifier).filter((r) => resources.includes(r));
     }
 
     async function save() {
@@ -523,6 +543,55 @@ function oauth2ClientUpsertModal(rawClient, settings) {
                 t.div(
                     { className: "field-help" },
                     "The client can request only the checked scopes. The custom scopes are defined in the issuer collection options.",
+                ),
+            ),
+            t.div(
+                { className: "col-sm-12" },
+                t.div(
+                    { className: "oauth2-scopes-field" },
+                    t.div({ className: "oauth2-methods-label" }, "Allowed resources"),
+                    t.div(
+                        { className: "oauth2-scopes" },
+                        () => {
+                            if (!data.issuerResources.length) {
+                                return t.span(
+                                    { className: "txt-hint txt-sm" },
+                                    "The issuer collection has no protected resources.",
+                                );
+                            }
+
+                            return data.issuerResources.map((resource) => {
+                                const id = uniqueId + ".resource." + resource.identifier;
+                                return t.div(
+                                    { className: "field oauth2-scope" },
+                                    t.input({
+                                        type: "checkbox",
+                                        id: id,
+                                        checked: () => data.client.resources.includes(resource.identifier),
+                                        onchange: (e) => toggleResource(resource.identifier, e.target.checked),
+                                    }),
+                                    t.label(
+                                        { htmlFor: id, title: resource.name || resource.identifier },
+                                        t.span({ className: "txt-code" }, resource.identifier),
+                                    ),
+                                );
+                            });
+                        },
+                    ),
+                ),
+                () => {
+                    const errs = app.store.errors?.resources;
+                    if (app.utils.isEmpty(errs)) {
+                        return;
+                    }
+                    const msg = errs.message || Object.values(errs).map((e) => e?.message).filter(Boolean).join(" ");
+                    return t.div({ className: "field-help error" }, msg);
+                },
+                t.div(
+                    { className: "field-help" },
+                    "The client can request JWT access tokens (",
+                    t.code(null, "resource"),
+                    " token request parameter) only for the checked resources. The resources are defined in the issuer collection options.",
                 ),
             ),
             t.div(

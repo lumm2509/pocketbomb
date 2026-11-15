@@ -30,12 +30,14 @@ export function oauth2ServerAccordion(upsertData) {
                     codeDuration: 60,
                     consentRequired: true,
                     scopes: [],
+                    resources: [],
                     signingKeys: [],
                     loginPage: { title: "", logoURL: "", primaryColor: "" },
                 };
             }
             c.oauth2Server.loginPage = c.oauth2Server.loginPage || {};
             c.oauth2Server.scopes = c.oauth2Server.scopes || [];
+            c.oauth2Server.resources = c.oauth2Server.resources || [];
             c.oauth2Server.signingKeys = c.oauth2Server.signingKeys || [];
             return c.oauth2Server;
         },
@@ -139,6 +141,186 @@ export function oauth2ServerAccordion(upsertData) {
                 }),
             ),
             help ? t.div({ className: "field-help" }, help) : null,
+        );
+    }
+
+    function addResource() {
+        data.config.resources.push({ identifier: "", name: "", accessTokenDuration: 300 });
+    }
+
+    function removeResource(index) {
+        const resource = data.config.resources[index];
+        if (!resource.identifier) {
+            data.config.resources.splice(index, 1);
+            app.utils.deleteByPath(app.store.errors, "oauth2Server.resources");
+            return;
+        }
+
+        app.modals.confirm(
+            t.div(
+                null,
+                t.p(null, "Do you really want to remove resource ", t.strong(null, resource.identifier), "?"),
+                t.p(
+                    { className: "txt-hint txt-sm" },
+                    "The OAuth2 clients allowed to use it must be updated before saving the collection.",
+                ),
+            ),
+            () => {
+                data.config.resources.splice(index, 1);
+                app.utils.deleteByPath(app.store.errors, "oauth2Server.resources");
+            },
+            null,
+            { yesButton: "Remove" },
+        );
+    }
+
+    function resourceError(index, key) {
+        return app.store.errors?.oauth2Server?.resources?.[index]?.[key]?.message || "";
+    }
+
+    function resourcesTable() {
+        return t.div(
+            { className: "col-sm-12" },
+            t.div(
+                { className: "oauth2-section-title" },
+                t.strong(null, "Protected resources"),
+                t.i({
+                    className: "ri-information-line link-hint",
+                    ariaDescription: app.attrs.tooltip(
+                        "The resource servers (e.g. other services of the platform) the allowed OAuth2 clients could request access tokens for with the token request \"resource\" parameter (RFC 8707). The issued tokens are JWT access tokens (RFC 9068, typ at+jwt) with the resource as \"aud\", signed with the signing keys below, so that the resource server verifies them offline with the issuer JWKS.",
+                    ),
+                }),
+                t.div({ className: "flex-fill" }),
+                t.button(
+                    { type: "button", className: "btn sm secondary", onclick: addResource },
+                    t.i({ className: "ri-add-line", ariaHidden: true }),
+                    t.span({ className: "txt" }, "Add resource"),
+                ),
+            ),
+            t.div(
+                { className: "oauth2-keys-field" },
+                t.table(
+                    { className: "table oauth2-keys-table" },
+                    t.thead(
+                        null,
+                        t.tr(
+                            null,
+                            t.th(null, "Identifier"),
+                            t.th(null, "Name"),
+                            t.th(null, "Token duration (s)"),
+                            t.th({ className: "col-actions" }),
+                        ),
+                    ),
+                    t.tbody(null, () => {
+                        const resources = data.config.resources;
+
+                        if (!resources.length) {
+                            return t.tr(
+                                null,
+                                t.td({ colSpan: 99, className: "txt-hint txt-center" }, "No protected resources."),
+                            );
+                        }
+
+                        return resources.map((resource, i) => {
+                            const inputId = uniqueId + ".resource." + i;
+
+                            return t.tr(
+                                null,
+                                t.td(
+                                    null,
+                                    t.div(
+                                        { className: () => `field ${resourceError(i, "identifier") ? "error" : ""}` },
+                                        t.input({
+                                            type: "text",
+                                            id: inputId + ".identifier",
+                                            name: `oauth2Server.resources.${i}.identifier`,
+                                            ariaLabel: "Identifier",
+                                            placeholder: "e.g. https://api.example.com",
+                                            required: true,
+                                            value: () => resource.identifier || "",
+                                            oninput: (e) => (resource.identifier = e.target.value.trim()),
+                                        }),
+                                    ),
+                                    () => {
+                                        const err = resourceError(i, "identifier");
+                                        if (err) {
+                                            return t.div({ className: "field-help error" }, err);
+                                        }
+                                    },
+                                ),
+                                t.td(
+                                    null,
+                                    t.div(
+                                        { className: "field" },
+                                        t.input({
+                                            type: "text",
+                                            id: inputId + ".name",
+                                            name: `oauth2Server.resources.${i}.name`,
+                                            ariaLabel: "Name",
+                                            placeholder: "Optional",
+                                            value: () => resource.name || "",
+                                            oninput: (e) => (resource.name = e.target.value),
+                                        }),
+                                    ),
+                                ),
+                                t.td(
+                                    null,
+                                    t.div(
+                                        {
+                                            className: () =>
+                                                `field ${resourceError(i, "accessTokenDuration") ? "error" : ""}`,
+                                        },
+                                        t.input({
+                                            type: "number",
+                                            id: inputId + ".accessTokenDuration",
+                                            name: `oauth2Server.resources.${i}.accessTokenDuration`,
+                                            ariaLabel: "Token duration (s)",
+                                            min: 10,
+                                            max: 86400,
+                                            step: 1,
+                                            required: true,
+                                            value: () => resource.accessTokenDuration || "",
+                                            oninput: (
+                                                e,
+                                            ) => (resource.accessTokenDuration = parseInt(e.target.value, 10) || 0),
+                                        }),
+                                    ),
+                                    () => {
+                                        const err = resourceError(i, "accessTokenDuration");
+                                        if (err) {
+                                            return t.div({ className: "field-help error" }, err);
+                                        }
+                                    },
+                                ),
+                                t.td(
+                                    { className: "col-actions" },
+                                    t.button(
+                                        {
+                                            type: "button",
+                                            className: "btn sm circle transparent secondary",
+                                            ariaLabel: app.attrs.tooltip("Remove resource", "left"),
+                                            onclick: () => removeResource(i),
+                                        },
+                                        t.i({ className: "ri-delete-bin-7-line", ariaHidden: true }),
+                                    ),
+                                ),
+                            );
+                        });
+                    }),
+                ),
+            ),
+            t.div(
+                { className: "field-help" },
+                "The resource access tokens are verified offline, so a revoked session is cut off only when they expire: keep their duration short (default 300s) and let the clients renew them with their refresh token.",
+            ),
+            () => {
+                const errs = app.store.errors?.oauth2Server?.resources;
+                if (app.utils.isEmpty(errs) || !errs.message) {
+                    return;
+                }
+
+                return t.div({ className: "field-help error" }, errs.message);
+            },
         );
     }
 
@@ -446,6 +628,7 @@ export function oauth2ServerAccordion(upsertData) {
                     " prefixes are reserved for the collection and system scopes.",
                 ),
             ),
+            resourcesTable(),
             // login page branding
             t.div(
                 { className: "col-sm-12" },
